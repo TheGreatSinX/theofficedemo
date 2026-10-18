@@ -1,277 +1,318 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Cloudflare Durable Object hosting one authoritative `OfficeRoom` instance
+ * per room id (the room id is the DO instance name). This is the Workers port
+ * of the local dev server's room wiring (`server.ts`): connection tickets are
+ * issued and consumed by the same DO using durable storage (per-room scope,
+ * single-use, 60s TTL), and every WebSocket message flows through the shared
+ * `OfficeRoom` logic (dynamic map registration, movement authority, ticks).
  */
 
 import {
-  PlayerNetState,
-  ServerMessage,
-  ClientMessage,
-  validateClientMessage,
   PROTOCOL_VERSION,
   DEFAULT_TICK_RATE,
   MAX_MESSAGE_SIZE_BYTES,
-  MAX_PLAYERS_PER_ROOM,
+  validateClientMessage,
+  ServerMessage,
 } from '../multiplayer/protocol';
 import { MovementAuthority } from '../multiplayer/authority';
-import { Direction, AvatarConfig } from '../types/game';
+import { OfficeRoom, RoomClientSession } from '../multiplayer/room';
+import { AvatarConfig } from '../types/game';
 
-/**
- * Cloudflare Durable Object implementation for Authoritative Office Room State.
- * This class coordinates real-time WebSockets, movement validation, and ticks on Cloudflare edge.
- */
+const TICKET_TTL_MS = 60 * 1000;
+
+const DEFAULT_AVATAR: AvatarConfig = {
+  skinColor: '#f8c291',
+  hairStyle: 'short',
+  hairColor: '#3d2714',
+  shirtColor: '#2563eb',
+  pantsColor: '#1e293b',
+  accessory: 'none',
+};
+
+interface StoredTicket {
+  ticketId: string;
+  userId: string;
+  displayName: string;
+  role: 'admin' | 'employee';
+  avatarConfig: AvatarConfig;
+  roomId: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function randomTicketId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
+  return `tkt_${hex}`;
+}
+
 export class OfficeDurableObject {
   private state: any; // DurableObjectState
-  private env: any;
-  private roomId: string = 'main_office';
-  private clients: Map<string, { ws: WebSocket; userId: string; lastSeen: number }> = new Map();
-  private playerStates: Map<string, PlayerNetState> = new Map();
-  private dirtyPlayerIds: Set<string> = new Set();
-  private movementAuthority: MovementAuthority = new MovementAuthority();
-  private tickInterval: any = null;
+  private env: any; // Env
+  public readonly roomId: string;
+  private room: OfficeRoom | null = null;
 
   constructor(state: any, env: any) {
     this.state = state;
     this.env = env;
+    const name = state?.id?.name;
+    this.roomId = typeof name === 'string' && name.length > 0 ? name : 'main_office';
+  }
+
+  /**
+   * Lazily creates the room so an idle DO (no connected players) does not keep
+   * a tick interval running; the room is released once the last player leaves.
+   */
+  private ensureRoom(): OfficeRoom {
+    if (!this.room) {
+      this.room = new OfficeRoom(this.roomId, new MovementAuthority());
+    }
+    return this.room;
+  }
+
+  private releaseRoomIfEmpty(): void {
+    if (this.room && this.room.getPlayerCount() === 0) {
+      this.room.dispose();
+      this.room = null;
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === '/websocket') {
-      const upgradeHeader = request.headers.get('Upgrade');
-      if (!upgradeHeader || upgradeHeader !== 'websocket') {
-        return new Response('Expected WebSocket upgrade', { status: 426 });
-      }
-
-      const userId = url.searchParams.get('userId') || `user_${Date.now()}`;
-      const displayName = url.searchParams.get('displayName') || 'Colleague';
-      const role = (url.searchParams.get('role') === 'admin' ? 'admin' : 'employee') as 'admin' | 'employee';
-
-      // Cloudflare WebSocket Pair
-      const [client, server] = Object.values(new (globalThis as any).WebSocketPair());
-      (server as any).accept();
-
-      this.handleWebSocket(server as any, {
-        userId,
-        displayName,
-        role,
-        avatarConfig: {
-          skinColor: '#f8c291',
-          hairStyle: 'short',
-          hairColor: '#3d2714',
-          shirtColor: role === 'admin' ? '#7c3aed' : '#2563eb',
-          pantsColor: '#1e293b',
-          accessory: 'none',
-        },
-      });
-
-      return new Response(null, {
-        status: 101,
-        webSocket: client as any,
-      } as any);
+    if (url.pathname === '/ws') {
+      return this.handleWebSocket(request, url);
     }
 
     if (url.pathname === '/occupants') {
-      return new Response(JSON.stringify(Array.from(this.playerStates.values())), {
-        headers: { 'Content-Type': 'application/json' },
+      return json({
+        roomId: this.roomId,
+        players: this.room?.getOccupants() ?? [],
+        map: this.room?.getMapRegistrationInfo() ?? null,
       });
+    }
+
+    if (url.pathname === '/issue-ticket') {
+      return this.handleIssueTicket(request);
     }
 
     return new Response('OfficeDurableObject Active', { status: 200 });
   }
 
-  private handleWebSocket(
-    ws: WebSocket,
-    userMeta: { userId: string; displayName: string; role: 'admin' | 'employee'; avatarConfig: AvatarConfig }
-  ) {
-    const { userId, displayName, role, avatarConfig } = userMeta;
-
-    if (this.clients.size >= MAX_PLAYERS_PER_ROOM) {
-      ws.close(4003, 'Room is full (max 50 users)');
-      return;
+  /**
+   * Internal endpoint (only reachable through the Worker): stores a
+   * single-use connection ticket for this room. Identity was resolved by the
+   * Worker; the role is re-normalized here so a malformed call can never mint
+   * an admin.
+   */
+  private async handleIssueTicket(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return json({ error: 'Method not allowed' }, 405);
     }
 
-    const netState: PlayerNetState = {
-      userId,
-      displayName,
-      role,
-      avatarConfig,
+    let body: any = null;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    if (typeof body?.userId !== 'string' || body.userId.length === 0) {
+      return json({ error: 'Missing userId' }, 400);
+    }
+
+    const now = Date.now();
+    const ticket: StoredTicket = {
+      ticketId: randomTicketId(),
+      userId: body.userId,
+      displayName:
+        typeof body.displayName === 'string' && body.displayName.length > 0
+          ? body.displayName
+          : 'Colleague',
+      role: body.role === 'admin' ? 'admin' : 'employee',
+      avatarConfig: (body.avatarConfig as AvatarConfig) || DEFAULT_AVATAR,
       roomId: this.roomId,
-      x: 8 * 32 + 16,
-      y: 11 * 32 + 16,
-      direction: 'down',
-      isMoving: false,
-      seq: 0,
-      timestamp: Date.now(),
+      createdAt: now,
+      expiresAt: now + TICKET_TTL_MS,
     };
 
-    this.clients.set(userId, { ws, userId, lastSeen: Date.now() });
-    this.playerStates.set(userId, netState);
+    await this.state.storage.put(`ticket:${ticket.ticketId}`, ticket, {
+      expirationTtl: TICKET_TTL_MS / 1000,
+    });
 
-    // Send room snapshot
-    const snapshotMsg: ServerMessage = {
-      type: 'room_snapshot',
+    return json({
+      ticketId: ticket.ticketId,
+      expiresAt: ticket.expiresAt,
+      roomId: ticket.roomId,
+      verified: body.verified === true,
+    });
+  }
+
+  /**
+   * WebSocket handshake. Ticket consumption mirrors `TicketService.consumeTicket`:
+   * single-use (deleted on first presentation), non-expired, and scoped to the
+   * room id this DO hosts.
+   */
+  private async handleWebSocket(request: Request, url: URL): Promise<Response> {
+    const upgrade = (request.headers.get('Upgrade') || '').toLowerCase();
+    if (upgrade !== 'websocket') {
+      return new Response('Expected WebSocket upgrade', { status: 426 });
+    }
+
+    const ticketId = url.searchParams.get('ticket');
+    if (!ticketId) {
+      return new Response('Missing connection ticket', { status: 401 });
+    }
+
+    const requestedRoomId = url.searchParams.get('roomId') || 'main_office';
+    if (requestedRoomId !== this.roomId) {
+      return new Response('Room mismatch', { status: 403 });
+    }
+
+    const storageKey = `ticket:${ticketId}`;
+    const stored = (await this.state.storage.get(storageKey)) as StoredTicket | undefined;
+    // Single-use: consume the ticket regardless of the outcome.
+    await this.state.storage.delete(storageKey);
+
+    if (!stored || stored.roomId !== requestedRoomId || Date.now() > stored.expiresAt) {
+      return new Response('Invalid or expired ticket', { status: 403 });
+    }
+
+    const pair = new (globalThis as any).WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    server.accept();
+
+    const room = this.ensureRoom();
+    const session: RoomClientSession = {
+      userId: stored.userId,
+      displayName: stored.displayName,
+      role: stored.role,
+      avatarConfig: stored.avatarConfig,
       roomId: this.roomId,
-      players: Array.from(this.playerStates.values()),
+      socket: {
+        send: (data: string) => {
+          try {
+            server.send(data);
+          } catch {
+            // Socket already closed
+          }
+        },
+        readyState: 1,
+        close: () => {
+          try {
+            server.close();
+          } catch {
+            // Socket already closed
+          }
+        },
+      },
+      lastSeen: Date.now(),
+    };
+
+    // Note: addPlayer sends the room_snapshot before this welcome, mirroring
+    // the local server's ordering.
+    const addResult = room.addPlayer(session);
+    if (!addResult.success) {
+      server.close(4003, addResult.error || 'Failed to join room');
+      this.releaseRoomIfEmpty();
+      return new Response(null, { status: 101, webSocket: client } as any);
+    }
+
+    const welcomeMsg: ServerMessage = {
+      type: 'welcome',
+      version: PROTOCOL_VERSION,
+      userId: stored.userId,
       serverTime: Date.now(),
+      tickRate: DEFAULT_TICK_RATE,
     };
-    ws.send(JSON.stringify(snapshotMsg));
+    server.send(JSON.stringify(welcomeMsg));
 
-    // Broadcast player joined
-    this.broadcast({
-      type: 'player_joined',
-      roomId: this.roomId,
-      player: netState,
-    }, userId);
-
-    ws.addEventListener('message', (event) => {
+    server.addEventListener('message', (event: any) => {
       try {
-        const text = typeof event.data === 'string' ? event.data : '';
+        const raw = event?.data;
+        const text =
+          typeof raw === 'string'
+            ? raw
+            : raw instanceof ArrayBuffer
+              ? new TextDecoder().decode(raw)
+              : '';
+        if (!text) return;
+
         if (text.length > MAX_MESSAGE_SIZE_BYTES) {
-          ws.close(1009, 'Payload too large');
+          server.close(1009, 'Message payload too large');
           return;
         }
 
-        const data = JSON.parse(text);
-        const validated = validateClientMessage(data);
-        if (!validated.valid || !validated.message) return;
+        const parsed = JSON.parse(text);
+        const validation = validateClientMessage(parsed);
+        if (!validation.valid || !validation.message) {
+          return;
+        }
 
-        const msg = validated.message;
-        if (msg.type === 'move_intent') {
-          const current = this.playerStates.get(userId);
-          if (current) {
-            const validation = this.movementAuthority.validateMovement(
-              current.x,
-              current.y,
-              msg.x,
-              msg.y,
-              0.05,
-              { width: 36, height: 24, tileSize: 32 }
-            );
+        const msg = validation.message;
+        session.lastSeen = Date.now();
 
-            if (validation.valid) {
-              current.x = validation.correctX;
-              current.y = validation.correctY;
-              current.direction = msg.direction;
-              current.isMoving = msg.isMoving;
-              current.seq = msg.seq;
-              current.timestamp = Date.now();
-              this.dirtyPlayerIds.add(userId);
-            } else {
-              ws.send(JSON.stringify({
-                type: 'movement_rejected',
-                roomId: this.roomId,
-                seq: msg.seq,
-                correctX: validation.correctX,
-                correctY: validation.correctY,
-                reason: validation.reason,
-              }));
-            }
+        switch (msg.type) {
+          case 'move_intent':
+            room.handleMoveIntent(stored.userId, msg);
+            break;
+          case 'heartbeat': {
+            const pongMsg: ServerMessage = {
+              type: 'pong',
+              clientTimestamp: msg.timestamp,
+              serverTime: Date.now(),
+            };
+            server.send(JSON.stringify(pongMsg));
+            break;
           }
-        } else if (msg.type === 'heartbeat') {
-          ws.send(JSON.stringify({
-            type: 'pong',
-            clientTimestamp: msg.timestamp,
-            serverTime: Date.now(),
-          }));
-        } else if (msg.type === 'leave_room') {
-          this.removePlayer(userId, 'left');
-        } else if (msg.type === 'reaction') {
-          this.broadcast(
-            {
-              type: 'player_reaction',
-              roomId: this.roomId,
-              userId,
-              emoji: msg.emoji,
-              timestamp: Date.now(),
-            },
-            userId
-          );
+          case 'leave_room':
+            room.removePlayer(stored.userId, 'left');
+            this.releaseRoomIfEmpty();
+            break;
+          case 'request_resync': {
+            const snapshotMsg: ServerMessage = {
+              type: 'room_snapshot',
+              roomId: room.roomId,
+              players: room.getOccupants(),
+              serverTime: Date.now(),
+            };
+            server.send(JSON.stringify(snapshotMsg));
+            break;
+          }
+          case 'reaction':
+            room.handleReaction(stored.userId, msg.emoji);
+            break;
+          case 'register_map':
+            room.registerMap(session, msg);
+            break;
         }
       } catch (err) {
-        // Ignore parse error
+        console.warn('[OfficeDurableObject] Error handling WebSocket message:', err);
       }
     });
 
-    ws.addEventListener('close', () => {
-      this.removePlayer(userId, 'disconnect');
+    server.addEventListener('close', () => {
+      room.removePlayer(stored.userId, 'disconnect');
+      this.releaseRoomIfEmpty();
     });
 
-    // Ensure tick loop is running
-    if (!this.tickInterval) {
-      this.tickInterval = setInterval(() => this.tick(), 1000 / DEFAULT_TICK_RATE);
-    }
-  }
-
-  private tick() {
-    if (this.dirtyPlayerIds.size === 0) return;
-
-    const updates: Array<{
-      userId: string;
-      x: number;
-      y: number;
-      direction: Direction;
-      isMoving: boolean;
-      seq: number;
-      timestamp: number;
-    }> = [];
-
-    for (const uid of this.dirtyPlayerIds) {
-      const state = this.playerStates.get(uid);
-      if (state) {
-        updates.push({
-          userId: state.userId,
-          x: state.x,
-          y: state.y,
-          direction: state.direction,
-          isMoving: state.isMoving,
-          seq: state.seq,
-          timestamp: state.timestamp,
-        });
-      }
-    }
-
-    this.dirtyPlayerIds.clear();
-
-    if (updates.length > 0) {
-      this.broadcast({
-        type: 'player_state',
-        roomId: this.roomId,
-        players: updates,
-      });
-    }
-  }
-
-  private removePlayer(userId: string, reason: 'disconnect' | 'left' = 'disconnect') {
-    if (!this.clients.has(userId)) return;
-
-    this.clients.delete(userId);
-    this.playerStates.delete(userId);
-    this.dirtyPlayerIds.delete(userId);
-
-    this.broadcast({
-      type: 'player_left',
-      roomId: this.roomId,
-      userId,
-      reason,
+    server.addEventListener('error', () => {
+      room.removePlayer(stored.userId, 'disconnect');
+      this.releaseRoomIfEmpty();
     });
 
-    if (this.clients.size === 0 && this.tickInterval) {
-      clearInterval(this.tickInterval);
-      this.tickInterval = null;
-    }
-  }
-
-  private broadcast(msg: ServerMessage, excludeUserId?: string) {
-    const json = JSON.stringify(msg);
-    for (const [uid, client] of this.clients.entries()) {
-      if (excludeUserId && uid === excludeUserId) continue;
-      try {
-        client.ws.send(json);
-      } catch {
-        // Socket closed
-      }
-    }
+    return new Response(null, { status: 101, webSocket: client } as any);
   }
 }

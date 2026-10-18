@@ -1,12 +1,28 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "office",
+  "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-12",
   "observability": {
     "enabled": true
   },
   "assets": {
     "directory": "dist",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application"
-  }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "OFFICE_ROOM",
+        "class_name": "OfficeDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["OfficeDurableObject"]
+    }
+  ]
 }

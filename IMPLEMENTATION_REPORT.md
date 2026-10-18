@@ -209,23 +209,41 @@ Key invariants:
 
 ## 11. Deployment (Cloudflare Workers)
 
-- The repo deploys through Cloudflare Workers Builds (build: `npm run build`,
-  deploy: `npx wrangler deploy`). A committed `wrangler.jsonc` is required so
-  the deploy runs non-interactively.
-- **Root cause of the first failed deploy:** without a committed Wrangler
-  config, `wrangler deploy` triggered its interactive "Vite framework"
+- Deploys through Cloudflare Workers Builds (build: `npm run build`, deploy:
+  `npx wrangler deploy`) driven by the committed `wrangler.jsonc` (worker
+  name `office`) — no interactive setup, no npm install during deploy.
+- **Root cause of the first failed deploy (fixed):** without a committed
+  Wrangler config, `wrangler deploy` ran its interactive "Vite framework"
   auto-setup, which shelled out to a plain `npm install` and aborted on this
   project's known `esbuild` peer conflict (`esbuild@^0.25` vs. Vite 8's
   `^0.27 || ^0.28`). The build step itself was always green.
-- **Fix:** `wrangler.jsonc` pins worker name `office`, uploads `dist/` as
-  static assets with `not_found_handling: single-page-application`, and is
-  verified with `npx wrangler deploy --dry-run` (wrangler 4.151.1 — the same
-  version CI resolves — reads the assets and exits with no prompts/installs).
-- **Scope note (honest):** this deploys the SPA as static assets only.
-  `src/worker/` (the Durable Object) is legacy — it predates protocol v1.1.0
-  (no connection tickets, no `register_map`, fixed map bounds) — so it is
-  intentionally not wired into the deploy yet. Production multiplayer
-  WebSockets require porting `server.ts`'s ticket + `OfficeRoom` stack into
-  the Worker/Durable Object before `main` is added to `wrangler.jsonc`; until
-  then the deployed site runs single-player and the client retries
-  multiplayer gracefully.
+- **Full-stack deploy:** the worker entry (`src/worker/index.ts`) serves the
+  SPA from `dist/` through the `ASSETS` binding and hosts the same
+  authoritative multiplayer stack as the local dev server (`server.ts`):
+  - `POST /api/auth/ticket` — identity verification
+    (`src/worker/workerAuth.ts`, the Workers-native port of
+    `src/multiplayer/serverAuth.ts`: RS256 via WebCrypto against Google's
+    secure-token JWKS + Firestore role lookup with the caller's own token)
+    and single-use, room-scoped, 60-second tickets stored in the room's
+    Durable Object.
+  - `GET /ws` — forwarded to the room's `OfficeDurableObject`, which runs the
+    shared `OfficeRoom` logic (dynamic `register_map` bounds, movement
+    authority, room ticks) over SQLite-backed Durable Object storage.
+  - `GET /api/health` and `GET /api/rooms?roomId=` — ops probes; `/api/*`
+    otherwise answers JSON 404 so the SPA never swallows API calls.
+- **Verified locally before pushing:** `npx wrangler dev` +
+  `npx tsx tests/worker.e2e.ts` — 27/27 checks against the real workerd
+  runtime: the ticket JSON contract and auth paths (no user → 400, disabled →
+  403, bad token → 401, GET → 405), handshake rejections (no ticket → 401,
+  consumed ticket reuse → 403, cross-room ticket → 403), `register_map`
+  canonical + mismatch flows, the movement round-trip, heartbeat/pong,
+  reactions, and disconnect broadcasts. `npx wrangler deploy --dry-run` also
+  verified (75 KiB bundle, both bindings resolved).
+- **Firebase-side steps (console, not repo):** multiplayer works without
+  sign-in (unverified `employee` tickets; admin can never be self-asserted).
+  For verified identities and roles, sign-in must be allowed on the deployed
+  origin: Firebase Console → Authentication → Settings → Authorized domains →
+  add the `*.workers.dev` domain. Until then the app logs Firestore
+  "Missing or insufficient permissions" (rules correctly require
+  `request.auth != null` — see `firestore.rules`) and falls back to local
+  data.

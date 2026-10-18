@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
+    "dev:worker": "npx wrangler dev",
+    "deploy:worker": "npm run build && npx wrangler deploy",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
