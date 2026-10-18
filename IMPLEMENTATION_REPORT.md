@@ -206,3 +206,26 @@ Key invariants:
 - Very large maps (>128 tiles per side) warn about editor performance by
   design; rendering uses chunked batching but very dense `row` layers rely on
   user discipline.
+
+## 11. Deployment (Cloudflare Workers)
+
+- The repo deploys through Cloudflare Workers Builds (build: `npm run build`,
+  deploy: `npx wrangler deploy`). A committed `wrangler.jsonc` is required so
+  the deploy runs non-interactively.
+- **Root cause of the first failed deploy:** without a committed Wrangler
+  config, `wrangler deploy` triggered its interactive "Vite framework"
+  auto-setup, which shelled out to a plain `npm install` and aborted on this
+  project's known `esbuild` peer conflict (`esbuild@^0.25` vs. Vite 8's
+  `^0.27 || ^0.28`). The build step itself was always green.
+- **Fix:** `wrangler.jsonc` pins worker name `office`, uploads `dist/` as
+  static assets with `not_found_handling: single-page-application`, and is
+  verified with `npx wrangler deploy --dry-run` (wrangler 4.151.1 — the same
+  version CI resolves — reads the assets and exits with no prompts/installs).
+- **Scope note (honest):** this deploys the SPA as static assets only.
+  `src/worker/` (the Durable Object) is legacy — it predates protocol v1.1.0
+  (no connection tickets, no `register_map`, fixed map bounds) — so it is
+  intentionally not wired into the deploy yet. Production multiplayer
+  WebSockets require porting `server.ts`'s ticket + `OfficeRoom` stack into
+  the Worker/Durable Object before `main` is added to `wrangler.jsonc`; until
+  then the deployed site runs single-player and the client retries
+  multiplayer gracefully.
