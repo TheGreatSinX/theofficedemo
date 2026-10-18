@@ -1,0 +1,6 @@
+{
+  "name": "GatherGrid RPG Virtual Office",
+  "description": "A retro pixel-art multiplayer virtual office inspired by Gather.town and RPG Maker MZ with tile collision, rooms, animated avatars, and interactive zones.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

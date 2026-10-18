@@ -1,0 +1,248 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile document containing employee identity, role, and avatar customization.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Full display name of the user",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the user",
+          "maxLength": 150
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Profile picture URL",
+          "maxLength": 500
+        },
+        "role": {
+          "type": "string",
+          "description": "Role of the user in the office",
+          "enum": ["admin", "employee"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Account active or disabled status",
+          "enum": ["active", "disabled"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Job title or team designation",
+          "maxLength": 100
+        },
+        "avatarConfig": {
+          "type": "object",
+          "description": "RPG pixel avatar styling parameters"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["uid", "displayName", "role", "status"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Security record establishing trusted administrator status.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Admin user UID",
+          "maxLength": 128
+        },
+        "grantedBy": {
+          "type": "string",
+          "description": "UID or system that granted admin privilege",
+          "maxLength": 128
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when admin role was granted"
+        }
+      },
+      "required": ["uid"]
+    },
+    "OfficeMap": {
+      "title": "OfficeMap",
+      "description": "Versioned office tilemap document containing layers, collision data, and publishing state.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Map ID identifier",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the office map",
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the office space",
+          "maxLength": 500
+        },
+        "schemaVersion": {
+          "type": "number",
+          "description": "Schema version number"
+        },
+        "mapVersion": {
+          "type": "number",
+          "description": "Sequential revision number"
+        },
+        "status": {
+          "type": "string",
+          "description": "Draft or published state",
+          "enum": ["draft", "published"]
+        },
+        "mapData": {
+          "type": "object",
+          "description": "Full structured map payload including tiles, walls, solidMask, objects, and zones"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of creator",
+          "maxLength": 128
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "UID of last editor",
+          "maxLength": 128
+        },
+        "publishedBy": {
+          "type": "string",
+          "description": "UID of publisher",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "schemaVersion", "mapVersion", "status", "mapData"]
+    },
+    "GeneralConfig": {
+      "title": "GeneralConfig",
+      "description": "Global platform settings.",
+      "type": "object",
+      "properties": {
+        "platformName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "activeMapId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "publishedMapVersion": {
+          "type": "number"
+        },
+        "maintenanceMode": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "required": ["platformName", "activeMapId"]
+    },
+    "HQWeatherConfig": {
+      "title": "HQWeatherConfig",
+      "description": "Headquarters weather simulation configuration.",
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "latitude": {
+          "type": "number"
+        },
+        "longitude": {
+          "type": "number"
+        },
+        "timezone": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "weatherEnabled": {
+          "type": "boolean"
+        },
+        "refreshIntervalMinutes": {
+          "type": "number"
+        },
+        "rainEffectsEnabled": {
+          "type": "boolean"
+        },
+        "lightingEffectsEnabled": {
+          "type": "boolean"
+        },
+        "windowEffectsEnabled": {
+          "type": "boolean"
+        },
+        "sourcePreference": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "required": ["location", "latitude", "longitude", "timezone", "weatherEnabled"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile records with self-service update restrictions"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminRecord",
+      "description": "Trusted admin whitelist records"
+    },
+    "/officeMaps/{mapId}": {
+      "schema": "OfficeMap",
+      "description": "Stored office maps with versioning and publishing status"
+    },
+    "/platformConfig/{configId}": {
+      "schema": "GeneralConfig",
+      "description": "Platform global configuration documents (general and hqWeather)"
+    }
+  }
+}
