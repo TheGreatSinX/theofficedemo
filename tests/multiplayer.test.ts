@@ -15,6 +15,7 @@ import { MovementAuthority } from '../src/multiplayer/authority';
 import { TicketService } from '../src/multiplayer/ticketService';
 import { OfficeRoom, OfficeRoomManager, RoomClientSession } from '../src/multiplayer/room';
 import { RemotePlayerManager } from '../src/multiplayer/RemotePlayerManager';
+import { computeMaskHash, createMaskGrid, encodeMaskForTransport } from '../src/game/maps/mapSchema';
 import { AvatarConfig } from '../src/types/game';
 
 const sampleAvatar: AvatarConfig = {
@@ -372,9 +373,11 @@ async function runTests() {
             x,
             y,
             depth: 16,
+            scale: 1,
             active: true,
             setSize: () => {},
             setOffset: () => {},
+            setScale: function (s: number) { this.scale = s; },
             setDepth: function (d: number) { this.depth = d; },
             setPosition: function (nx: number, ny: number) { this.x = nx; this.y = ny; },
             play: () => {},
@@ -681,6 +684,334 @@ async function runTests() {
     assert.strictEqual((receivedReaction as any).emoji, '🎉');
 
     reactionRoom.dispose();
+  });
+
+  // ==========================================
+  // SECTION 7: DYNAMIC MAP REGISTRATION
+  // ==========================================
+  console.log('\n--- 7. Dynamic Map Registration & Server-Side Bounds ---');
+
+  const buildMask = (w: number, h: number, solidCells: Array<[number, number]>) => {
+    const mask = createMaskGrid(w, h, false);
+    for (const [x, y] of solidCells) {
+      if (mask[y] && x >= 0 && x < w) mask[y][x] = true;
+    }
+    return mask;
+  };
+
+  await test('Test 28: register_map validation accepts well-formed payloads and rejects malformed ones', () => {
+    const mask = buildMask(10, 10, []);
+    const base = {
+      type: 'register_map',
+      roomId: 'dynamic_office',
+      mapId: 'dyn_map_a',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, mask),
+      maskRle: encodeMaskForTransport(mask),
+      spawnTileX: 3,
+      spawnTileY: 3,
+    };
+    assert.strictEqual(validateClientMessage({ ...base }).valid, true, 'Valid register_map must pass');
+    assert.strictEqual(validateClientMessage({ ...base, width: 0 }).valid, false, 'Zero width must be rejected');
+    assert.strictEqual(validateClientMessage({ ...base, tileSize: 4 }).valid, false, 'Tiny tile size must be rejected');
+    assert.strictEqual(validateClientMessage({ ...base, maskRle: '' }).valid, false, 'Empty mask must be rejected');
+    assert.strictEqual(validateClientMessage({ ...base, mapId: '' }).valid, false, 'Empty mapId must be rejected');
+    assert.strictEqual(validateClientMessage({ ...base, width: 'ten' }).valid, false, 'Non-numeric width must be rejected');
+  });
+
+  await test('Test 29: First register_map defines authoritative bounds, spawn and collision mask', () => {
+    const dynRoom = new OfficeRoom('dynamic_office_test', new MovementAuthority(), 50);
+    const sockOwner = createMockSocket();
+    const ownerSession: RoomClientSession = {
+      userId: 'map_owner',
+      displayName: 'Owner',
+      role: 'admin',
+      avatarConfig: sampleAvatar,
+      roomId: 'dynamic_office_test',
+      socket: sockOwner,
+      lastSeen: Date.now(),
+    };
+    dynRoom.addPlayer(ownerSession, 100, 100);
+
+    sockOwner.messages.length = 0;
+    const mask = buildMask(10, 10, [[4, 3]]);
+    dynRoom.registerMap(ownerSession, {
+      type: 'register_map',
+      roomId: 'dynamic_office_test',
+      mapId: 'dyn_map_a',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, mask),
+      maskRle: encodeMaskForTransport(mask),
+      spawnTileX: 3,
+      spawnTileY: 3,
+    });
+
+    const registered = sockOwner.messages.find((m) => m.type === 'map_registered');
+    assert.ok(registered, 'Registering client must receive map_registered');
+    assert.strictEqual(registered.canonical, true, 'First registration is canonical');
+    assert.strictEqual(registered.width, 10);
+    assert.strictEqual(registered.height, 10);
+    assert.strictEqual(registered.spawnX, 3 * 32 + 16);
+    assert.strictEqual(registered.spawnY, 3 * 32 + 16);
+
+    const info = dynRoom.getMapRegistrationInfo();
+    assert.strictEqual(info.registered, true);
+    assert.strictEqual(info.mapId, 'dyn_map_a');
+    assert.strictEqual(info.width, 10);
+    assert.strictEqual(info.height, 10);
+
+    const ownerState = dynRoom.getOccupants().find((p) => p.userId === 'map_owner');
+    assert.strictEqual(ownerState?.x, 112, 'Owner snapped to the validated spawn');
+    assert.strictEqual(ownerState?.y, 112);
+
+    // Solid tile from the registered mask blocks movement (adjacent move is within leap limits)
+    sockOwner.messages.length = 0;
+    dynRoom.handleMoveIntent('map_owner', {
+      type: 'move_intent',
+      seq: 1,
+      roomId: 'dynamic_office_test',
+      x: 4 * 32 + 16,
+      y: 112,
+      vx: 135,
+      vy: 0,
+      direction: 'right',
+      isMoving: true,
+      clientTime: Date.now(),
+    });
+    const rejection = sockOwner.messages.find((m) => m.type === 'movement_rejected');
+    assert.ok(rejection, 'Movement into a registered solid tile must be rejected');
+    assert.ok(
+      String(rejection.reason).toLowerCase().includes('blocked'),
+      `Expected collision rejection, got: ${rejection.reason}`
+    );
+
+    // Open adjacent tile is accepted
+    dynRoom.handleMoveIntent('map_owner', {
+      type: 'move_intent',
+      seq: 2,
+      roomId: 'dynamic_office_test',
+      x: 112,
+      y: 144,
+      vx: 0,
+      vy: 135,
+      direction: 'down',
+      isMoving: true,
+      clientTime: Date.now(),
+    });
+    const ownerAfter = dynRoom.getOccupants().find((p) => p.userId === 'map_owner');
+    assert.strictEqual(ownerAfter?.x, 112);
+    assert.strictEqual(ownerAfter?.y, 144);
+
+    dynRoom.dispose();
+  });
+
+  await test('Test 30: Out-of-bounds movement is clamped against the registered dynamic size', () => {
+    const dynRoom = new OfficeRoom('dynamic_bounds_test', new MovementAuthority(), 50);
+    const sock = createMockSocket();
+    const session: RoomClientSession = {
+      userId: 'bounds_user',
+      displayName: 'Bounds',
+      role: 'employee',
+      avatarConfig: sampleAvatar,
+      roomId: 'dynamic_bounds_test',
+      socket: sock,
+      lastSeen: Date.now(),
+    };
+    dynRoom.addPlayer(session, 100, 100);
+
+    const mask = buildMask(10, 10, []);
+    dynRoom.registerMap(session, {
+      type: 'register_map',
+      roomId: 'dynamic_bounds_test',
+      mapId: 'dyn_map_b',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, mask),
+      maskRle: encodeMaskForTransport(mask),
+      spawnTileX: 1,
+      spawnTileY: 1,
+    });
+
+    sock.messages.length = 0;
+    // 10x10 @ 32px => max valid X = 304 (tileSize/2 margin). 308 is inside the
+    // old default 36x24 fallback bounds but outside the registered map.
+    dynRoom.handleMoveIntent('bounds_user', {
+      type: 'move_intent',
+      seq: 1,
+      roomId: 'dynamic_bounds_test',
+      x: 308,
+      y: 48,
+      vx: 135,
+      vy: 0,
+      direction: 'right',
+      isMoving: true,
+      clientTime: Date.now(),
+    });
+
+    const rejection = sock.messages.find((m) => m.type === 'movement_rejected');
+    assert.ok(rejection, 'Out-of-bounds movement must be rejected');
+    assert.ok(
+      String(rejection.reason).toLowerCase().includes('boundaries'),
+      `Expected boundary rejection, got: ${rejection.reason}`
+    );
+    assert.strictEqual(rejection.correctX, 304, 'Correction clamps to registered width');
+
+    dynRoom.dispose();
+  });
+
+  await test('Test 31: Second client with the same mask is accepted; a mismatched mask reports the canonical revision', () => {
+    const dynRoom = new OfficeRoom('dynamic_mismatch_test', new MovementAuthority(), 50);
+    const sockOwner = createMockSocket();
+    const ownerSession: RoomClientSession = {
+      userId: 'canonical_owner',
+      displayName: 'Owner',
+      role: 'admin',
+      avatarConfig: sampleAvatar,
+      roomId: 'dynamic_mismatch_test',
+      socket: sockOwner,
+      lastSeen: Date.now(),
+    };
+    dynRoom.addPlayer(ownerSession, 100, 100);
+
+    const canonicalMask = buildMask(10, 10, [[4, 3]]);
+    const canonicalHash = computeMaskHash(10, 10, canonicalMask);
+    dynRoom.registerMap(ownerSession, {
+      type: 'register_map',
+      roomId: 'dynamic_mismatch_test',
+      mapId: 'dyn_map_c',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: canonicalHash,
+      maskRle: encodeMaskForTransport(canonicalMask),
+      spawnTileX: 2,
+      spawnTileY: 2,
+    });
+
+    // Same-mask joiner
+    const sockSame = createMockSocket();
+    const sameSession: RoomClientSession = {
+      userId: 'same_mask_user',
+      displayName: 'Same',
+      role: 'employee',
+      avatarConfig: sampleAvatar,
+      roomId: 'dynamic_mismatch_test',
+      socket: sockSame,
+      lastSeen: Date.now(),
+    };
+    dynRoom.addPlayer(sameSession, 48, 48);
+    sockSame.messages.length = 0;
+    dynRoom.registerMap(sameSession, {
+      type: 'register_map',
+      roomId: 'dynamic_mismatch_test',
+      mapId: 'dyn_map_c',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: canonicalHash,
+      maskRle: encodeMaskForTransport(canonicalMask),
+      spawnTileX: 5,
+      spawnTileY: 5,
+    });
+    const sameRegistered = sockSame.messages.find((m) => m.type === 'map_registered');
+    assert.ok(sameRegistered, 'Matching client must receive map_registered');
+    assert.strictEqual(sameRegistered.canonical, false, 'Later matching registration is not canonical');
+
+    // Mismatched-mask joiner
+    const sockDiff = createMockSocket();
+    const diffSession: RoomClientSession = {
+      userId: 'diff_mask_user',
+      displayName: 'Diff',
+      role: 'employee',
+      avatarConfig: sampleAvatar,
+      roomId: 'dynamic_mismatch_test',
+      socket: sockDiff,
+      lastSeen: Date.now(),
+    };
+    dynRoom.addPlayer(diffSession, 48, 48);
+    sockDiff.messages.length = 0;
+    const differentMask = buildMask(10, 10, [[0, 0], [1, 1]]);
+    dynRoom.registerMap(diffSession, {
+      type: 'register_map',
+      roomId: 'dynamic_mismatch_test',
+      mapId: 'dyn_map_c_edited',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, differentMask),
+      maskRle: encodeMaskForTransport(differentMask),
+      spawnTileX: 5,
+      spawnTileY: 5,
+    });
+    const mismatch = sockDiff.messages.find((m) => m.type === 'map_mismatch');
+    assert.ok(mismatch, 'Divergent client must receive map_mismatch');
+    assert.strictEqual(mismatch.maskHash, canonicalHash, 'Mismatch carries the canonical hash');
+    assert.strictEqual(mismatch.width, 10);
+    assert.ok(mismatch.maskRle.length > 0, 'Mismatch carries the canonical mask for reconciliation');
+
+    dynRoom.dispose();
+  });
+
+  await test('Test 32: Players standing inside newly solid tiles are relocated on registration', () => {
+    const relRoom = new OfficeRoom('dynamic_relocate_test', new MovementAuthority(), 50);
+    const sockOwner = createMockSocket();
+    const sockBystander = createMockSocket();
+    const ownerSession: RoomClientSession = {
+      userId: 'reloc_owner',
+      displayName: 'Owner',
+      role: 'admin',
+      avatarConfig: sampleAvatar,
+      roomId: 'dynamic_relocate_test',
+      socket: sockOwner,
+      lastSeen: Date.now(),
+    };
+    const bystanderSession: RoomClientSession = {
+      userId: 'reloc_bystander',
+      displayName: 'Bystander',
+      role: 'employee',
+      avatarConfig: sampleAvatar,
+      roomId: 'dynamic_relocate_test',
+      socket: sockBystander,
+      lastSeen: Date.now(),
+    };
+    relRoom.addPlayer(ownerSession, 100, 100);
+    relRoom.addPlayer(bystanderSession, 300, 100); // tile (9, 3) at 32px
+
+    sockBystander.messages.length = 0;
+    const mask = buildMask(10, 10, [[9, 3]]);
+    relRoom.registerMap(ownerSession, {
+      type: 'register_map',
+      roomId: 'dynamic_relocate_test',
+      mapId: 'dyn_map_d',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, mask),
+      maskRle: encodeMaskForTransport(mask),
+      spawnTileX: 1,
+      spawnTileY: 1,
+    });
+
+    const correction = sockBystander.messages.find((m) => m.type === 'movement_rejected');
+    assert.ok(correction, 'Bystander standing in a newly solid tile must be corrected');
+    assert.ok(
+      String(correction.reason).includes('Relocated'),
+      `Expected relocation correction, got: ${correction.reason}`
+    );
+
+    const bystander = relRoom.getOccupants().find((p) => p.userId === 'reloc_bystander');
+    assert.strictEqual(bystander?.x, correction.correctX, 'Server state matches the correction');
+    assert.ok(
+      bystander && (bystander.x !== 300 || bystander.y !== 100),
+      'Bystander must be moved out of the solid tile'
+    );
+
+    relRoom.dispose();
   });
 
   console.log('\n============================================================');

@@ -1,6 +1,16 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * OfficeScene — the shared Phaser renderer for World Mode (gameplay) and
+ * Studio Mode (map editing).
+ *
+ * Rendering model (schema v2):
+ *  - Ground tile layers are batched into chunked RenderTextures.
+ *  - Row tile layers (walls) become Y-sorted sprites.
+ *  - Objects and avatars are Y-sorted sprites above the tile layers.
+ *  - Imported RPG Maker MZ assets are resolved through the asset registry;
+ *    builtin procedural textures remain the fallback for legacy tile IDs.
  */
 
 import Phaser from 'phaser';
@@ -8,7 +18,6 @@ import {
   generateTileTextures,
   generateObjectTextures,
   generateAvatarSpritesheet,
-  TILE_SIZE,
 } from './pixelArtGenerator';
 import {
   OfficeMapData,
@@ -16,12 +25,82 @@ import {
   InteractionZone,
   Direction,
   AvatarConfig,
-  EditorSettings,
   MapObject,
+  MapLayerData,
 } from '../types/game';
 import { sounds } from './soundEffects';
 import { RemotePlayerManager } from '../multiplayer/RemotePlayerManager';
 import { PlayerNetState } from '../multiplayer/protocol';
+import { assetRegistry } from '../services/AssetRegistry';
+import {
+  BUILTIN_TEXTURE_KEY_BY_TILE_ID,
+  findTilesetForTile,
+  getCollisionLayer,
+  getCollisionMask,
+  getDefaultSpawn,
+  getTileLayers,
+  getSpawnPoints,
+  isBuiltinTileId,
+} from './maps/mapSchema';
+import {
+  applyCommand,
+  CellChange,
+  EditCommand,
+} from './edits';
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+export type StudioTool = 'select' | 'pan' | 'paint' | 'erase' | 'object' | 'collision' | 'spawn';
+
+export type StudioObjectRef =
+  | { kind: 'builtin'; type: string }
+  | { kind: 'asset'; assetId: string; frame: number; widthTiles: number; heightTiles: number };
+
+export interface StudioEditorSettings {
+  activeTool: StudioTool;
+  activeLayerId: string | null;
+  selectedTileId: number;
+  paintCollisionWithWalls: boolean;
+  selectedObject: StudioObjectRef | null;
+  brushSize: number;
+  showGrid: boolean;
+  showCollision: boolean;
+  showZones: boolean;
+  zoom: number;
+}
+
+export const DEFAULT_STUDIO_SETTINGS: StudioEditorSettings = {
+  activeTool: 'paint',
+  activeLayerId: null,
+  selectedTileId: 0,
+  paintCollisionWithWalls: true,
+  selectedObject: { kind: 'builtin', type: 'desk_single' },
+  brushSize: 1,
+  showGrid: false,
+  showCollision: false,
+  showZones: true,
+  zoom: 2,
+};
+
+export type StudioSelection =
+  | { kind: 'object'; id: string }
+  | { kind: 'zone'; id: string }
+  | { kind: 'spawn'; id: string }
+  | null;
+
+export interface WeatherVisualState {
+  isRaining: boolean;
+  lightning: boolean;
+  condition: string;
+}
+
+export interface WeatherEffectFlags {
+  rainEffectsEnabled: boolean;
+  lightingEffectsEnabled: boolean;
+  windowEffectsEnabled: boolean;
+}
 
 export interface SceneCallbacks {
   onZoneChange: (zone: InteractionZone | null) => void;
@@ -36,7 +115,10 @@ export interface SceneCallbacks {
   }) => void;
   onMapChange: (mapId: string, mapName: string) => void;
   onInteract: (zone: InteractionZone) => void;
-  onMapModified?: (newMapData: OfficeMapData) => void;
+  onEditTransaction?: (commands: EditCommand[]) => void;
+  onSelectionChange?: (selection: StudioSelection) => void;
+  onCursorMove?: (tileX: number, tileY: number, inside: boolean) => void;
+  onZoomChange?: (zoom: number) => void;
   onSceneReady?: () => void;
 }
 
@@ -54,9 +136,33 @@ interface ActiveReactionBubble {
   offsetY: number;
 }
 
+interface DragState {
+  active: boolean;
+  kind: 'object' | 'zone' | 'spawn' | null;
+  id: string | null;
+  offsetX: number;
+  offsetY: number;
+  ghostX: number;
+  ghostY: number;
+  moved: boolean;
+}
+
+const ZONE_COLORS: Record<string, number> = {
+  meeting_room: 0x8b5cf6,
+  coffee: 0xf59e0b,
+  watercooler: 0x38bdf8,
+  whiteboard: 0xec4899,
+  desk: 0x94a3b8,
+  door_warp: 0x22c55e,
+  phone_booth: 0x06b6d4,
+};
+
 export class OfficeScene extends Phaser.Scene {
   private currentMapId: string = 'main_office';
   private mapData!: OfficeMapData;
+  private tileSize: number = 32;
+  private tileScale: number = 1;
+
   private player!: Phaser.Physics.Arcade.Sprite;
   private playerNameTag!: Phaser.GameObjects.Container;
   private playerProfile: UserProfile;
@@ -72,10 +178,20 @@ export class OfficeScene extends Phaser.Scene {
   > = new Map();
 
   // Rendering containers
-  private floorImageMap: Map<string, Phaser.GameObjects.Image> = new Map();
-  private wallImageMap: Map<string, Phaser.GameObjects.Image> = new Map();
+  private terrainChunks: Map<string, Phaser.GameObjects.RenderTexture> = new Map();
+  private rowLayerImages: Map<string, Phaser.GameObjects.Image> = new Map();
   private objectImageMap: Map<string, Phaser.GameObjects.Image> = new Map();
+  private dirtyChunks: Set<string> = new Set();
+
+  // Overlays
   private collisionOverlayGraphics!: Phaser.GameObjects.Graphics;
+  private gridGraphics!: Phaser.GameObjects.Graphics;
+  private boundsGraphics!: Phaser.GameObjects.Graphics;
+  private zoneGraphics!: Phaser.GameObjects.Graphics;
+  private spawnMarkerMap: Map<string, Phaser.GameObjects.Container> = new Map();
+  private selectionGraphics!: Phaser.GameObjects.Graphics;
+  private hoverGraphics!: Phaser.GameObjects.Graphics;
+  private windowRainGraphics?: Phaser.GameObjects.Graphics;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private interactionKeyE!: Phaser.Input.Keyboard.Key;
@@ -97,17 +213,47 @@ export class OfficeScene extends Phaser.Scene {
   private isControlsEnabled: boolean = true;
   public isReady: boolean = false;
 
-  // Editor mode state
-  private isEditorMode: boolean = false;
-  private editorSettings: EditorSettings = {
-    activeTool: 'brush_floor',
-    selectedFloorTile: 0,
-    selectedWallTile: 11,
-    selectedObjectType: 'desk_single',
-    showCollisionOverlay: false,
+  // Studio state
+  private isStudioMode: boolean = false;
+  private studioSettings: StudioEditorSettings = { ...DEFAULT_STUDIO_SETTINGS };
+  private studioSelection: StudioSelection = null;
+  private isPointerDownForEditing: boolean = false;
+  private strokeIsErasing: boolean = false;
+  private dragState: DragState = {
+    active: false,
+    kind: null,
+    id: null,
+    offsetX: 0,
+    offsetY: 0,
+    ghostX: 0,
+    ghostY: 0,
+    moved: false,
   };
-  private editorHoverBox!: Phaser.GameObjects.Graphics;
-  private isPointerDownForPainting: boolean = false;
+
+  // Stroke buffers (flushed into a single undo transaction on pointerup)
+  private pendingTileChanges: Map<string, Array<CellChange<number>>> = new Map();
+  private pendingCollisionChanges: Array<CellChange<boolean>> = [];
+  private pendingObjectCommands: EditCommand[] = [];
+  private pendingZoneCommands: EditCommand[] = [];
+  private pendingSpawnCommands: EditCommand[] = [];
+  private isPanning: boolean = false;
+  private panPointerStart: { x: number; y: number; scrollX: number; scrollY: number } = {
+    x: 0,
+    y: 0,
+    scrollX: 0,
+    scrollY: 0,
+  };
+  private lastCursorTile: { x: number; y: number } | null = null;
+
+  // Weather
+  private weatherState: WeatherVisualState | null = null;
+  private weatherFlags: WeatherEffectFlags = {
+    rainEffectsEnabled: true,
+    lightingEffectsEnabled: true,
+    windowEffectsEnabled: true,
+  };
+  private rainEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private lightningTimer: Phaser.Time.TimerEvent | null = null;
 
   // Speech bubbles list
   private activeSpeechBubbles: ActiveSpeechBubble[] = [];
@@ -136,7 +282,6 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   preload() {
-    // Generate and register tile & object textures
     const tileTextures = generateTileTextures();
     Object.entries(tileTextures).forEach(([key, canvas]) => {
       if (!this.textures.exists(key)) {
@@ -151,6 +296,8 @@ export class OfficeScene extends Phaser.Scene {
       }
     });
 
+    this.registerPlaceholderTextures();
+
     // Generate player spritesheet
     this.registerAvatarSpritesheet('player_avatar', this.playerProfile.avatarConfig);
 
@@ -160,13 +307,49 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
+  private registerPlaceholderTextures() {
+    if (!this.textures.exists('tile_missing')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 32;
+      canvas.height = 32;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#7f1d1d';
+      ctx.fillRect(0, 0, 32, 32);
+      ctx.fillStyle = '#fca5a5';
+      ctx.fillRect(0, 0, 16, 16);
+      ctx.fillRect(16, 16, 16, 16);
+      this.textures.addCanvas('tile_missing', canvas);
+    }
+    if (!this.textures.exists('obj_missing')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 32;
+      canvas.height = 32;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = 'rgba(239,68,68,0.85)';
+      ctx.fillRect(4, 4, 24, 24);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(5, 5, 22, 22);
+      this.textures.addCanvas('obj_missing', canvas);
+    }
+    if (!this.textures.exists('weather_rain_drop')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2;
+      canvas.height = 10;
+      const ctx = canvas.getContext('2d')!;
+      const gradient = ctx.createLinearGradient(0, 0, 0, 10);
+      gradient.addColorStop(0, 'rgba(186,230,253,0)');
+      gradient.addColorStop(1, 'rgba(125,211,252,0.9)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 2, 10);
+      this.textures.addCanvas('weather_rain_drop', canvas);
+    }
+  }
+
   private registerAvatarSpritesheet(key: string, config: AvatarConfig) {
     if (!this.textures || !this.anims) return;
     const canvas = generateAvatarSpritesheet(config);
 
-    // If texture already exists as a CanvasTexture, update its 2D context in-place.
-    // This immediately updates the texture in WebGL without destroying the underlying
-    // frames or corrupting active animation states!
     if (this.textures.exists(key)) {
       const existing = this.textures.get(key) as Phaser.Textures.CanvasTexture;
       if (existing && typeof existing.getContext === 'function') {
@@ -177,17 +360,12 @@ export class OfficeScene extends Phaser.Scene {
         return;
       }
 
-      // If existing is not an in-place CanvasTexture, remove associated animations before removing texture
       const dirs = ['down', 'left', 'right', 'up'];
       dirs.forEach((dir) => {
         const walkKey = `${key}_walk_${dir}`;
-        if (this.anims.exists(walkKey)) {
-          this.anims.remove(walkKey);
-        }
+        if (this.anims.exists(walkKey)) this.anims.remove(walkKey);
         const idleKey = `${key}_idle_${dir}`;
-        if (this.anims.exists(idleKey)) {
-          this.anims.remove(idleKey);
-        }
+        if (this.anims.exists(idleKey)) this.anims.remove(idleKey);
       });
       this.textures.remove(key);
     }
@@ -202,7 +380,6 @@ export class OfficeScene extends Phaser.Scene {
       }
     }
 
-    // Create 4-direction walking and idle animations
     const anims = this.anims;
     const dirs: { name: string; row: number }[] = [
       { name: 'down', row: 0 },
@@ -213,72 +390,52 @@ export class OfficeScene extends Phaser.Scene {
 
     dirs.forEach(({ name, row }) => {
       const animKey = `${key}_walk_${name}`;
-      if (anims.exists(animKey)) {
-        anims.remove(animKey);
-      }
+      if (anims.exists(animKey)) anims.remove(animKey);
       anims.create({
         key: animKey,
-        frames: anims.generateFrameNumbers(key, {
-          start: row * 3,
-          end: row * 3 + 2,
-        }),
+        frames: anims.generateFrameNumbers(key, { start: row * 3, end: row * 3 + 2 }),
         frameRate: 8,
         repeat: -1,
         yoyo: true,
       });
 
       const idleKey = `${key}_idle_${name}`;
-      if (anims.exists(idleKey)) {
-        anims.remove(idleKey);
-      }
-      anims.create({
-        key: idleKey,
-        frames: [{ key, frame: row * 3 + 1 }],
-        frameRate: 1,
-      });
+      if (anims.exists(idleKey)) anims.remove(idleKey);
+      anims.create({ key: idleKey, frames: [{ key, frame: row * 3 + 1 }], frameRate: 1 });
     });
   }
 
   create() {
-    // Input setup - Arrow keys & click to move (WASD removed per user request)
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
-      // CRITICAL: Disable all global browser key captures in Phaser!
-      // By default Phaser captures registered keys and calls event.preventDefault() on keydown,
-      // which completely breaks typing characters like 'E', Space, or arrows in input fields & chat.
       this.input.keyboard.clearCaptures();
       this.interactionKeyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E, false);
       this.interactionKeySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE, false);
       this.shiftKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT, false);
 
-      // Listen for E / Space interaction (with safeguard against active text inputs)
       this.interactionKeyE.on('down', () => this.handleInteractionPress());
       this.interactionKeySpace.on('down', () => this.handleInteractionPress());
     }
 
-    // Build the map
     this.buildMapFromCurrentData();
-
-    // Setup Click to move and Editor pointer events
-    this.setupPointerAndEditorEvents();
-
-    // Viewport resize handling
+    this.setupPointerEvents();
     this.scale.on('resize', this.handleResize, this);
 
-    // Mark scene as ready and notify React
     this.isReady = true;
-    if (this.callbacks.onSceneReady) {
-      this.callbacks.onSceneReady();
-    }
+    if (this.callbacks.onSceneReady) this.callbacks.onSceneReady();
   }
 
   private handleResize() {
     if (!this.mapData || !this.cameras.main) return;
-    const worldWidth = this.mapData.width * TILE_SIZE;
-    const worldHeight = this.mapData.height * TILE_SIZE;
+    const worldWidth = this.mapData.width * this.tileSize;
+    const worldHeight = this.mapData.height * this.tileSize;
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
   }
+
+  // -------------------------------------------------------------------------
+  // Public control surface
+  // -------------------------------------------------------------------------
 
   public setControlsEnabled(enabled: boolean) {
     this.isControlsEnabled = enabled;
@@ -291,22 +448,37 @@ export class OfficeScene extends Phaser.Scene {
     this.speedMultiplier = active ? 1.4 : 1.0;
   }
 
-  public setEditorMode(enabled: boolean, settings?: EditorSettings) {
-    this.isEditorMode = enabled;
-    if (settings) {
-      this.editorSettings = { ...settings };
-    }
+  public setStudioMode(enabled: boolean, settings?: StudioEditorSettings) {
+    this.isStudioMode = enabled;
+    if (settings) this.studioSettings = { ...settings };
     if (!this.isReady) return;
-    if (this.editorHoverBox) {
-      this.editorHoverBox.setVisible(enabled);
+    this.refreshAllOverlays();
+    this.setControlsEnabled(!enabled);
+    if (!enabled) {
+      this.clearSelectionInternal();
+      this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
+      this.cameras.main.setZoom(this.defaultZoom());
+    } else {
+      this.cameras.main.setZoom(this.studioSettings.zoom || this.defaultZoom());
     }
-    this.updateCollisionOverlay();
   }
 
-  public updateEditorSettings(settings: EditorSettings) {
-    this.editorSettings = { ...settings };
+  public updateStudioSettings(settings: StudioEditorSettings) {
+    this.studioSettings = { ...settings };
     if (!this.isReady) return;
-    this.updateCollisionOverlay();
+    if (this.isStudioMode && settings.zoom > 0) {
+      this.cameras.main.setZoom(settings.zoom);
+    }
+    this.refreshAllOverlays();
+  }
+
+  public setSelection(selection: StudioSelection) {
+    this.studioSelection = selection;
+  }
+
+  public recenterCamera() {
+    if (!this.isReady) return;
+    this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
   }
 
   public updatePlayerAvatar(newConfig: AvatarConfig) {
@@ -347,143 +519,590 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Applies externally computed commands (undo/redo/property edits) and
+   * refreshes the visuals. The commands are applied to the same in-memory map
+   * object held by React.
+   */
+  public applyExternalCommands(commands: EditCommand[]) {
+    if (!this.isReady || commands.length === 0) return;
+    for (const command of commands) {
+      applyCommand(this.mapData, command);
+    }
+    this.refreshFromCommands(commands);
+  }
+
+  /**
+   * Refreshes the rendered scene after the map data object was mutated
+   * elsewhere (e.g. React applied undo/redo commands). Does not re-apply the
+   * commands.
+   */
+  public refreshFromCommands(commands: EditCommand[]) {
+    if (!this.isReady || commands.length === 0) return;
+
+    const plan = this.collectRefreshPlan(commands);
+
+    if (plan.structural) {
+      const px = this.player?.x;
+      const py = this.player?.y;
+      this.buildMapFromCurrentData();
+      if (this.player && px !== undefined && py !== undefined) {
+        const clamped = this.clampToWalkable(px, py);
+        this.player.setPosition(clamped.x, clamped.y);
+      }
+      return;
+    }
+
+    for (const [layerId, cells] of plan.tileCells) {
+      const layer = (this.mapData.layers || []).find((l) => l.id === layerId);
+      if (!layer) continue;
+      for (const cell of cells) this.markCellDirty(layer, cell.x, cell.y);
+    }
+    if (plan.collisionTouched) this.refreshCollisionBodies();
+    if (plan.objectsTouched) this.refreshObjects();
+    if (plan.zonesTouched) this.refreshZoneVisuals();
+    if (plan.spawnsTouched) this.refreshSpawnMarkers();
+    this.refreshAllOverlays();
+  }
+
+  private collectRefreshPlan(commands: EditCommand[]): {
+    structural: boolean;
+    tileCells: Map<string, Array<{ x: number; y: number }>>;
+    collisionTouched: boolean;
+    objectsTouched: boolean;
+    zonesTouched: boolean;
+    spawnsTouched: boolean;
+  } {
+    let structural = false;
+    const tileCells = new Map<string, Array<{ x: number; y: number }>>();
+    let collisionTouched = false;
+    let objectsTouched = false;
+    let zonesTouched = false;
+    let spawnsTouched = false;
+
+    for (const command of commands) {
+      switch (command.kind) {
+        case 'tiles': {
+          const list = tileCells.get(command.layerId) || [];
+          for (const c of command.changes) list.push({ x: c.x, y: c.y });
+          tileCells.set(command.layerId, list);
+          break;
+        }
+        case 'collision':
+          collisionTouched = true;
+          break;
+        case 'object.add':
+        case 'object.remove':
+        case 'object.update':
+          objectsTouched = true;
+          break;
+        case 'zone.add':
+        case 'zone.remove':
+        case 'zone.update':
+          zonesTouched = true;
+          break;
+        case 'spawn.add':
+        case 'spawn.remove':
+        case 'spawn.update':
+          spawnsTouched = true;
+          break;
+        default:
+          structural = true;
+      }
+    }
+
+    return { structural, tileCells, collisionTouched, objectsTouched, zonesTouched, spawnsTouched };
+  }
+
+  // -------------------------------------------------------------------------
+  // Weather
+  // -------------------------------------------------------------------------
+
+  public setWeather(state: WeatherVisualState | null, flags?: Partial<WeatherEffectFlags>) {
+    this.weatherState = state;
+    if (flags) this.weatherFlags = { ...this.weatherFlags, ...flags };
+    if (!this.isReady) return;
+    this.applyWeatherVisuals();
+  }
+
+  private applyWeatherVisuals() {
+    const outdoor = this.mapData?.environment === 'outdoor';
+    const state = this.weatherState;
+    const raining = !!state?.isRaining && this.weatherFlags.rainEffectsEnabled;
+
+    // Rain particles (outdoor maps, or indoor when window effects are enabled)
+    const shouldRain = raining && (outdoor || this.weatherFlags.windowEffectsEnabled);
+    if (shouldRain) {
+      this.ensureRainEmitter();
+      this.rainEmitter?.start();
+    } else if (this.rainEmitter) {
+      this.rainEmitter.stop();
+    }
+
+    // Lightning
+    const lightningEnabled = !!state?.lightning && this.weatherFlags.lightingEffectsEnabled;
+    if (lightningEnabled && !this.lightningTimer) {
+      this.lightningTimer = this.time.addEvent({
+        delay: Phaser.Math.Between(7000, 18000),
+        loop: true,
+        callback: () => {
+          if (this.cameras?.main) this.cameras.main.flash(260, 232, 240, 255);
+        },
+      });
+    } else if (!lightningEnabled && this.lightningTimer) {
+      this.lightningTimer.remove();
+      this.lightningTimer = null;
+    }
+
+    this.refreshWindowRainOverlay(raining && !outdoor);
+  }
+
+  private ensureRainEmitter() {
+    if (this.rainEmitter) return;
+    try {
+      const width = this.scale.width;
+      const handle = this.add.particles(0, 0, 'weather_rain_drop', {
+        x: { min: -40, max: width + 40 },
+        y: -24,
+        lifespan: 1400,
+        speedY: { min: 520, max: 680 },
+        speedX: { min: -70, max: -30 },
+        quantity: 2,
+        frequency: 45,
+        scale: { start: 0.9, end: 0.5 },
+        alpha: { start: 0.6, end: 0.15 },
+        emitting: false,
+      });
+      this.rainEmitter = handle as unknown as Phaser.GameObjects.Particles.ParticleEmitter;
+      this.rainEmitter.setDepth(9400);
+      this.rainEmitter.setScrollFactor(0);
+    } catch (err) {
+      console.warn('[OfficeScene] Rain particle emitter unavailable:', err);
+      this.rainEmitter = null;
+      this.weatherFlags.rainEffectsEnabled = false;
+    }
+  }
+
+  private refreshWindowRainOverlay(active: boolean) {
+    if (!this.windowRainGraphics) {
+      this.windowRainGraphics = this.add.graphics();
+      this.windowRainGraphics.setDepth(9350);
+    }
+    const g = this.windowRainGraphics;
+    g.clear();
+    if (!active) return;
+
+    g.fillStyle(0x38bdf8, 0.14);
+    const tileLayers = getTileLayers(this.mapData);
+    for (const layer of tileLayers) {
+      if (!layer.tiles) continue;
+      for (let y = 0; y < this.mapData.height; y++) {
+        for (let x = 0; x < this.mapData.width; x++) {
+          const tileId = layer.tiles[y]?.[x];
+          if (tileId === 12) {
+            g.fillRect(x * this.tileSize, y * this.tileSize, this.tileSize, this.tileSize);
+          }
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Map building
+  // -------------------------------------------------------------------------
+
+  private defaultZoom(): number {
+    return Phaser.Math.Clamp(70 / this.tileSize, 0.75, 3.2);
+  }
+
   private buildMapFromCurrentData(overrideSpawnX?: number, overrideSpawnY?: number) {
-    // Clear existing objects
-    if (this.staticWallsGroup) {
-      this.staticWallsGroup.clear(true, true);
-    }
-    this.collisionBlocksMap.clear();
-    this.floorImageMap.clear();
-    this.wallImageMap.clear();
-    this.objectImageMap.clear();
-    this.children.removeAll();
-    this.otherUserSprites.clear();
-    this.activeSpeechBubbles = [];
-    this.activeReactionBubbles.forEach((b) => b.container.destroy());
-    this.activeReactionBubbles.clear();
-    if (this.remotePlayerManager) {
-      this.remotePlayerManager.clearAll();
-    }
+    this.clearWorld();
+
+    this.tileSize = this.mapData.tileSize || 32;
+    this.tileScale = this.tileSize / 32;
 
     this.callbacks.onMapChange(this.mapData.id, this.mapData.name);
 
-    const { width, height, tileSize, floorTiles, wallTiles, solidMask, objects } = this.mapData;
-
     this.staticWallsGroup = this.physics.add.staticGroup();
 
-    // 1. Render Floor Layer
-    const floorKeyMap: Record<number, string> = {
-      0: 'tile_wood',
-      1: 'tile_carpet_blue',
-      2: 'tile_gray',
-      3: 'tile_checkered',
-      4: 'tile_deck',
-      5: 'tile_grass',
-    };
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const tileId = floorTiles[y][x];
-        const textureKey = floorKeyMap[tileId] || 'tile_wood';
-        const img = this.add.image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, textureKey);
-        img.setDepth(0);
-        this.floorImageMap.set(`${x},${y}`, img);
+    // 1. Register imported asset textures used by this map.
+    const assetIds = this.collectAssetIds();
+    for (const assetId of assetIds) this.ensureAssetTexture(assetId);
+    if (assetIds.length > 0) {
+      const missing = assetIds.filter((id) => !assetRegistry.getCachedImage(id));
+      if (missing.length > 0) {
+        // Load in the background, then rebuild once textures are available.
+        assetRegistry.preload(missing).then(() => {
+          if (this.isReady && !this.isWarping) {
+            const px = this.player?.x;
+            const py = this.player?.y;
+            this.buildMapFromCurrentData();
+            if (this.player && px !== undefined && py !== undefined) {
+              const clamped = this.clampToWalkable(px, py);
+              this.player.setPosition(clamped.x, clamped.y);
+            }
+          }
+        });
       }
     }
 
-    // 2. Render Wall Tiles
-    const wallKeyMap: Record<number, string> = {
-      10: 'wall_top',
-      11: 'wall_face',
-      12: 'wall_window',
-      13: 'wall_glass',
-    };
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const wallId = wallTiles[y][x];
-        if (wallId > 0) {
-          const textureKey = wallKeyMap[wallId] || 'wall_face';
-          const wallImg = this.add.image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, textureKey);
-          wallImg.setDepth(10 + y);
-          this.wallImageMap.set(`${x},${y}`, wallImg);
-        }
+    // 2. Tile layers
+    const tileLayers = getTileLayers(this.mapData);
+    for (const layer of tileLayers) {
+      if (!layer.visible) continue;
+      if (layer.depthMode === 'row') {
+        this.renderRowLayer(layer);
+      } else {
+        this.renderGroundLayer(layer);
       }
     }
 
-    // 3. Render Objects & Furniture
-    objects.forEach((obj) => {
-      const objImg = this.add.image(
-        obj.tileX * tileSize + (obj.width * tileSize) / 2,
-        obj.tileY * tileSize + (obj.height * tileSize) / 2,
-        obj.type
-      );
-      objImg.setDepth(15 + obj.tileY);
-      this.objectImageMap.set(obj.id, objImg);
-    });
+    // 3. Objects
+    this.refreshObjects();
 
-    // 4. Create Collision Bodies from solidMask
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (solidMask[y][x]) {
-          this.createCollisionBlock(x, y);
-        }
-      }
-    }
+    // 4. Collision bodies
+    this.refreshCollisionBodies();
 
-    // 5. Collision Overlay Graphic for Editor
+    // 5. Overlays
     this.collisionOverlayGraphics = this.add.graphics();
-    this.collisionOverlayGraphics.setDepth(995);
-    this.updateCollisionOverlay();
+    this.collisionOverlayGraphics.setDepth(8000);
+    this.gridGraphics = this.add.graphics();
+    this.gridGraphics.setDepth(8100);
+    this.boundsGraphics = this.add.graphics();
+    this.boundsGraphics.setDepth(8050);
+    this.zoneGraphics = this.add.graphics();
+    this.zoneGraphics.setDepth(8150);
+    this.selectionGraphics = this.add.graphics();
+    this.selectionGraphics.setDepth(8250);
+    this.hoverGraphics = this.add.graphics();
+    this.hoverGraphics.setDepth(8300);
+    this.spawnMarkerMap.clear();
 
     // 6. Spawn Player
-    const spawnX = (overrideSpawnX !== undefined ? overrideSpawnX : this.mapData.spawnPoint.tileX) * tileSize + tileSize / 2;
-    const spawnY = (overrideSpawnY !== undefined ? overrideSpawnY : this.mapData.spawnPoint.tileY) * tileSize + tileSize / 2;
+    const spawn = getDefaultSpawn(this.mapData);
+    const spawnX = (overrideSpawnX !== undefined ? overrideSpawnX : spawn.tileX) * this.tileSize + this.tileSize / 2;
+    const spawnY = (overrideSpawnY !== undefined ? overrideSpawnY : spawn.tileY) * this.tileSize + this.tileSize / 2;
 
     this.player = this.physics.add.sprite(spawnX, spawnY, 'player_avatar');
+    this.player.setScale(this.tileScale);
     this.player.setCollideWorldBounds(true);
-    this.player.setSize(18, 12);
-    this.player.setOffset(7, 20);
-
-    // Ragnarok-style hover nameplate below player sprite
+    this.player.setSize(18 * this.tileScale, 12 * this.tileScale);
+    this.player.setOffset(7 * this.tileScale, 20 * this.tileScale);
+    this.player.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + spawnY + 0.3);
     this.createRagnarokNameplate(this.player, `${this.playerProfile.name} (You)`, '#38bdf8', true);
-
     this.physics.add.collider(this.player, this.staticWallsGroup);
 
-    // Initialize or reset RemotePlayerManager
     if (!this.remotePlayerManager) {
       this.remotePlayerManager = new RemotePlayerManager(
         this,
         this.playerProfile.id,
         (key, cfg) => this.registerAvatarSpritesheet(key, cfg),
-        this.staticWallsGroup
+        this.staticWallsGroup,
+        this.tileScale
       );
     } else {
       this.remotePlayerManager.setLocalUserId(this.playerProfile.id);
+      this.remotePlayerManager.setTileScale(this.tileScale);
     }
 
-    // 7. Spawn Mock Colleagues
+    // 7. Mock colleagues
     this.otherUsers
       .filter((u) => u.currentMapId === this.mapData.id)
-      .forEach((colleague) => {
-        this.spawnColleague(colleague);
-      });
+      .forEach((colleague) => this.spawnColleague(colleague));
 
-    // 8. Setup Camera
-    const worldWidth = width * tileSize;
-    const worldHeight = height * tileSize;
+    // 8. Camera
+    const worldWidth = this.mapData.width * this.tileSize;
+    const worldHeight = this.mapData.height * this.tileSize;
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
-    this.cameras.main.setZoom(2.2);
+    this.cameras.main.setZoom(this.isStudioMode ? this.studioSettings.zoom || this.defaultZoom() : this.defaultZoom());
 
-    // 9. Floating Interaction Prompt
+    // 9. Prompt + editor overlays
     this.createFloatingPrompt();
+    this.refreshAllOverlays();
+    this.applyWeatherVisuals();
+  }
 
-    // 10. Editor Hover Box
-    this.editorHoverBox = this.add.graphics();
-    this.editorHoverBox.setDepth(996);
-    this.editorHoverBox.setVisible(this.isEditorMode);
+  private collectAssetIds(): string[] {
+    const ids = new Set<string>();
+    for (const ts of this.mapData.tilesets || []) {
+      if (ts.assetId) ids.add(ts.assetId);
+    }
+    for (const obj of this.mapData.objects) {
+      if (obj.assetId) ids.add(obj.assetId);
+    }
+    return Array.from(ids);
+  }
+
+  private clearWorld() {
+    for (const rt of this.terrainChunks.values()) rt.destroy();
+    this.terrainChunks.clear();
+    this.dirtyChunks.clear();
+    for (const img of this.rowLayerImages.values()) img.destroy();
+    this.rowLayerImages.clear();
+    for (const img of this.objectImageMap.values()) img.destroy();
+    this.objectImageMap.clear();
+    for (const marker of this.spawnMarkerMap.values()) marker.destroy();
+    this.spawnMarkerMap.clear();
+    if (this.staticWallsGroup) this.staticWallsGroup.clear(true, true);
+    this.collisionBlocksMap.clear();
+    this.otherUserSprites.forEach((entry) => {
+      entry.sprite.destroy();
+      entry.nameTag.destroy();
+    });
+    this.otherUserSprites.clear();
+    this.activeSpeechBubbles.forEach((b) => b.container.destroy());
+    this.activeSpeechBubbles = [];
+    this.activeReactionBubbles.forEach((b) => b.container.destroy());
+    this.activeReactionBubbles.clear();
+    if (this.remotePlayerManager) this.remotePlayerManager.clearAll();
+    if (this.rainEmitter) {
+      try {
+        (this.rainEmitter as unknown as { destroy?: () => void }).destroy?.();
+      } catch {
+        // ignore emitter teardown errors
+      }
+      this.rainEmitter = null;
+    }
+
+    // Destroy remaining display-list children (player, overlays, prompt tags...).
+    this.children.removeAll(true);
+  }
+
+  private ensureAssetTexture(assetId: string): boolean {
+    const key = `asset_${assetId}`;
+    if (this.textures.exists(key)) return true;
+    const img = assetRegistry.getCachedImage(assetId);
+    if (!img) return false;
+    const meta = assetRegistry.get(assetId);
+    const texture = this.textures.addImage(key, img);
+    if (texture && meta) {
+      const count = Math.max(1, meta.columns * meta.rows);
+      for (let i = 0; i < count; i++) {
+        const col = i % meta.columns;
+        const row = Math.floor(i / meta.columns);
+        try {
+          texture.add(i, 0, col * meta.frameWidth, row * meta.frameHeight, meta.frameWidth, meta.frameHeight);
+        } catch {
+          // Frame may already exist — ignore duplicates.
+        }
+      }
+      if (meta.columns === 1 && meta.rows === 1) {
+        // Ensure frame 0 exists for single-image assets.
+        try {
+          texture.add(0, 0, 0, 0, meta.width, meta.height);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // Tile rendering
+  // -------------------------------------------------------------------------
+
+  private resolveTile(layerTileId: number): { key: string; frame?: number; displayW: number; displayH: number } {
+    if (layerTileId < 0) return { key: 'tile_missing', displayW: this.tileSize, displayH: this.tileSize };
+
+    if (isBuiltinTileId(layerTileId)) {
+      const key = BUILTIN_TEXTURE_KEY_BY_TILE_ID[layerTileId] || 'tile_missing';
+      return { key, displayW: this.tileSize, displayH: this.tileSize };
+    }
+
+    const tileset = findTilesetForTile(this.mapData, layerTileId);
+    if (tileset && tileset.assetId) {
+      this.ensureAssetTexture(tileset.assetId);
+      const key = `asset_${tileset.assetId}`;
+      if (this.textures.exists(key)) {
+        const scale = tileset.scale ?? 1;
+        return {
+          key,
+          frame: layerTileId - tileset.firstTileId,
+          displayW: this.tileSize * scale,
+          displayH: this.tileSize * scale,
+        };
+      }
+    }
+    return { key: 'tile_missing', displayW: this.tileSize, displayH: this.tileSize };
+  }
+
+  private chunkSizeTiles(): number {
+    const cells = this.mapData.width * this.mapData.height;
+    const target = Math.ceil(Math.sqrt(cells / 256));
+    return Phaser.Math.Clamp(Math.max(16, target), 16, 64);
+  }
+
+  private chunkKey(layerId: string, cx: number, cy: number): string {
+    return `${layerId}:${cx},${cy}`;
+  }
+
+  private renderGroundLayer(layer: MapLayerData) {
+    if (!layer.tiles) return;
+    const chunk = this.chunkSizeTiles();
+    const cols = Math.ceil(this.mapData.width / chunk);
+    const rows = Math.ceil(this.mapData.height / chunk);
+    for (let cy = 0; cy < rows; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        if (this.chunkHasTiles(layer, cx, cy, chunk)) {
+          this.rebuildChunk(layer, cx, cy, chunk);
+        }
+      }
+    }
+  }
+
+  private chunkHasTiles(layer: MapLayerData, cx: number, cy: number, chunk: number): boolean {
+    if (!layer.tiles) return false;
+    const x0 = cx * chunk;
+    const y0 = cy * chunk;
+    for (let y = y0; y < Math.min(y0 + chunk, this.mapData.height); y++) {
+      for (let x = x0; x < Math.min(x0 + chunk, this.mapData.width); x++) {
+        if ((layer.tiles[y]?.[x] ?? -1) >= 0) return true;
+      }
+    }
+    return false;
+  }
+
+  private rebuildChunk(layer: MapLayerData, cx: number, cy: number, chunk: number) {
+    const key = this.chunkKey(layer.id, cx, cy);
+    const worldX = cx * chunk * this.tileSize;
+    const worldY = cy * chunk * this.tileSize;
+    const worldW = Math.min(chunk, this.mapData.width - cx * chunk) * this.tileSize;
+    const worldH = Math.min(chunk, this.mapData.height - cy * chunk) * this.tileSize;
+
+    let rt = this.terrainChunks.get(key);
+    if (!rt) {
+      rt = this.add.renderTexture(worldX, worldY, worldW, worldH);
+      rt.setOrigin(0, 0);
+      rt.setDepth(layer.order * 0.1);
+      this.terrainChunks.set(key, rt);
+    }
+
+    rt.clear();
+    const stamp = new Phaser.GameObjects.Image(this, 0, 0, 'tile_missing');
+    for (let y = cy * chunk; y < Math.min(cy * chunk + chunk, this.mapData.height); y++) {
+      for (let x = cx * chunk; x < Math.min(cx * chunk + chunk, this.mapData.width); x++) {
+        const tileId = layer.tiles?.[y]?.[x] ?? -1;
+        if (tileId < 0) continue;
+        const resolved = this.resolveTile(tileId);
+        stamp.setTexture(resolved.key, resolved.frame);
+        stamp.setOrigin(0.5);
+        stamp.setDisplaySize(resolved.displayW, resolved.displayH);
+        stamp.setPosition(
+          x * this.tileSize + this.tileSize / 2 - worldX,
+          y * this.tileSize + this.tileSize / 2 - worldY
+        );
+        rt.draw(stamp);
+      }
+    }
+    stamp.destroy();
+  }
+
+  private renderRowLayer(layer: MapLayerData) {
+    if (!layer.tiles) return;
+    for (let y = 0; y < this.mapData.height; y++) {
+      for (let x = 0; x < this.mapData.width; x++) {
+        const tileId = layer.tiles[y]?.[x] ?? -1;
+        if (tileId < 0) continue;
+        this.createRowImage(layer, x, y, tileId);
+      }
+    }
+  }
+
+  private createRowImage(layer: MapLayerData, x: number, y: number, tileId: number) {
+    const key = `${layer.id}:${x},${y}`;
+    const resolved = this.resolveTile(tileId);
+    let img = this.rowLayerImages.get(key);
+    if (!img) {
+      img = this.add.image(0, 0, resolved.key, resolved.frame);
+      this.rowLayerImages.set(key, img);
+    } else {
+      img.setTexture(resolved.key, resolved.frame);
+    }
+    img.setDisplaySize(resolved.displayW, resolved.displayH);
+    img.setPosition(x * this.tileSize + this.tileSize / 2, y * this.tileSize + this.tileSize / 2);
+    img.setDepth(layer.order * 0.1 + (y + 1) * this.tileSize + 0.1);
+  }
+
+  private markCellDirty(layer: MapLayerData, x: number, y: number) {
+    if (layer.kind === 'collision') {
+      this.updateCollisionCell(x, y);
+      return;
+    }
+    if (!layer.tiles) return;
+    const tileId = layer.tiles[y]?.[x] ?? -1;
+    if (layer.depthMode === 'row') {
+      const key = `${layer.id}:${x},${y}`;
+      const existing = this.rowLayerImages.get(key);
+      if (tileId < 0) {
+        if (existing) {
+          existing.destroy();
+          this.rowLayerImages.delete(key);
+        }
+      } else {
+        this.createRowImage(layer, x, y, tileId);
+      }
+      return;
+    }
+    const chunk = this.chunkSizeTiles();
+    this.dirtyChunks.add(this.chunkKey(layer.id, Math.floor(x / chunk), Math.floor(y / chunk)));
+  }
+
+  // -------------------------------------------------------------------------
+  // Objects / collision / overlays
+  // -------------------------------------------------------------------------
+
+  private resolveObjectTexture(obj: MapObject): { key: string; frame?: number; displayW: number; displayH: number } {
+    const displayW = obj.width * this.tileSize;
+    const displayH = obj.height * this.tileSize;
+    if (obj.assetId) {
+      this.ensureAssetTexture(obj.assetId);
+      const key = `asset_${obj.assetId}`;
+      if (this.textures.exists(key)) {
+        return { key, frame: obj.frame ?? 0, displayW, displayH };
+      }
+      return { key: 'obj_missing', displayW, displayH };
+    }
+    if (this.textures.exists(obj.type)) {
+      return { key: obj.type, displayW, displayH };
+    }
+    return { key: 'obj_missing', displayW, displayH };
+  }
+
+  private refreshObjects() {
+    for (const img of this.objectImageMap.values()) img.destroy();
+    this.objectImageMap.clear();
+    for (const obj of this.mapData.objects) {
+      if (obj.layerId) {
+        const layer = (this.mapData.layers || []).find((l) => l.id === obj.layerId);
+        if (layer && layer.visible === false) continue;
+      }
+      const resolved = this.resolveObjectTexture(obj);
+      const img = this.add.image(
+        obj.tileX * this.tileSize + (obj.width * this.tileSize) / 2,
+        obj.tileY * this.tileSize + (obj.height * this.tileSize) / 2,
+        resolved.key,
+        resolved.frame
+      );
+      img.setDisplaySize(resolved.displayW, resolved.displayH);
+      if (obj.opacity !== undefined) img.setAlpha(obj.opacity);
+      if (obj.rotation) img.setAngle(obj.rotation);
+      img.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + (obj.tileY + obj.height) * this.tileSize + 0.2);
+      this.objectImageMap.set(obj.id, img);
+    }
+  }
+
+  private refreshCollisionBodies() {
+    if (this.staticWallsGroup) this.staticWallsGroup.clear(true, true);
+    this.collisionBlocksMap.clear();
+    const mask = getCollisionMask(this.mapData);
+    for (let y = 0; y < this.mapData.height; y++) {
+      for (let x = 0; x < this.mapData.width; x++) {
+        if (mask[y]?.[x]) this.createCollisionBlock(x, y);
+      }
+    }
   }
 
   private createCollisionBlock(x: number, y: number) {
@@ -491,10 +1110,10 @@ export class OfficeScene extends Phaser.Scene {
     if (this.collisionBlocksMap.has(key)) return;
 
     const block = this.add.rectangle(
-      x * TILE_SIZE + TILE_SIZE / 2,
-      y * TILE_SIZE + TILE_SIZE / 2,
-      TILE_SIZE,
-      TILE_SIZE
+      x * this.tileSize + this.tileSize / 2,
+      y * this.tileSize + this.tileSize / 2,
+      this.tileSize,
+      this.tileSize
     );
     block.setVisible(false);
     this.physics.add.existing(block, true);
@@ -511,32 +1130,202 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
-  private updateCollisionOverlay() {
-    if (!this.collisionOverlayGraphics || !this.mapData) return;
-    this.collisionOverlayGraphics.clear();
+  private updateCollisionCell(x: number, y: number) {
+    const solid = getCollisionMask(this.mapData)[y]?.[x] === true;
+    if (solid) this.createCollisionBlock(x, y);
+    else this.removeCollisionBlock(x, y);
+  }
 
-    if (!this.isEditorMode || !this.editorSettings.showCollisionOverlay) {
-      return;
+  public clampToWalkable(x: number, y: number): { x: number; y: number } {
+    const maxX = this.mapData.width * this.tileSize - 1;
+    const maxY = this.mapData.height * this.tileSize - 1;
+    let cx = Phaser.Math.Clamp(x, 1, maxX);
+    let cy = Phaser.Math.Clamp(y, 1, maxY);
+    const mask = getCollisionMask(this.mapData);
+    const tx = Phaser.Math.Clamp(Math.floor(cx / this.tileSize), 0, this.mapData.width - 1);
+    const ty = Phaser.Math.Clamp(Math.floor(cy / this.tileSize), 0, this.mapData.height - 1);
+    if (mask[ty]?.[tx]) {
+      // Nudge towards the nearest open neighbour.
+      const candidates = [
+        { x: tx + 1, y: ty },
+        { x: tx - 1, y: ty },
+        { x: tx, y: ty + 1 },
+        { x: tx, y: ty - 1 },
+      ];
+      for (const c of candidates) {
+        if (c.x >= 0 && c.y >= 0 && c.x < this.mapData.width && c.y < this.mapData.height && !mask[c.y]?.[c.x]) {
+          cx = c.x * this.tileSize + this.tileSize / 2;
+          cy = c.y * this.tileSize + this.tileSize / 2;
+          break;
+        }
+      }
     }
+    return { x: cx, y: cy };
+  }
 
-    const { width, height, solidMask } = this.mapData;
-    this.collisionOverlayGraphics.fillStyle(0xef4444, 0.35);
-    this.collisionOverlayGraphics.lineStyle(1, 0xef4444, 0.7);
+  private refreshAllOverlays() {
+    this.updateCollisionOverlay();
+    this.updateGridOverlay();
+    this.updateBoundsOverlay();
+    this.refreshZoneVisuals();
+    this.refreshSpawnMarkers();
+    this.updateSelectionOverlay();
+  }
 
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (solidMask[y][x]) {
-          this.collisionOverlayGraphics.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          this.collisionOverlayGraphics.strokeRect(x * TILE_SIZE + 0.5, y * TILE_SIZE + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+  private updateCollisionOverlay() {
+    if (!this.collisionOverlayGraphics || !this.mapData.layers) return;
+    const g = this.collisionOverlayGraphics;
+    g.clear();
+    const show = (this.isStudioMode && this.studioSettings.showCollision) || false;
+    if (!show) return;
+    const mask = getCollisionMask(this.mapData);
+    g.fillStyle(0xef4444, 0.3);
+    g.lineStyle(1, 0xef4444, 0.65);
+    for (let y = 0; y < this.mapData.height; y++) {
+      for (let x = 0; x < this.mapData.width; x++) {
+        if (mask[y]?.[x]) {
+          g.fillRect(x * this.tileSize, y * this.tileSize, this.tileSize, this.tileSize);
+          g.strokeRect(x * this.tileSize + 0.5, y * this.tileSize + 0.5, this.tileSize - 1, this.tileSize - 1);
         }
       }
     }
   }
 
-  /**
-   * Ragnarok Online Inspired Character Nameplate
-   * Rendered BELOW character sprite on hover or touch selection with ultra-crisp resolution!
-   */
+  private updateGridOverlay() {
+    if (!this.gridGraphics) return;
+    const g = this.gridGraphics;
+    g.clear();
+    if (!this.isStudioMode || !this.studioSettings.showGrid) return;
+    g.lineStyle(1, 0x64748b, 0.28);
+    const w = this.mapData.width * this.tileSize;
+    const h = this.mapData.height * this.tileSize;
+    for (let x = 0; x <= this.mapData.width; x++) {
+      g.beginPath();
+      g.moveTo(x * this.tileSize + 0.5, 0);
+      g.lineTo(x * this.tileSize + 0.5, h);
+      g.strokePath();
+    }
+    for (let y = 0; y <= this.mapData.height; y++) {
+      g.beginPath();
+      g.moveTo(0, y * this.tileSize + 0.5);
+      g.lineTo(w, y * this.tileSize + 0.5);
+      g.strokePath();
+    }
+  }
+
+  private updateBoundsOverlay() {
+    if (!this.boundsGraphics) return;
+    const g = this.boundsGraphics;
+    g.clear();
+    g.lineStyle(2, 0x6366f1, 0.85);
+    g.strokeRect(1, 1, this.mapData.width * this.tileSize - 2, this.mapData.height * this.tileSize - 2);
+  }
+
+  private refreshZoneVisuals() {
+    if (!this.zoneGraphics) return;
+    const g = this.zoneGraphics;
+    g.clear();
+    if (!this.isStudioMode || !this.studioSettings.showZones) return;
+    for (const zone of this.mapData.interactionZones) {
+      const color = ZONE_COLORS[zone.type] ?? 0x6366f1;
+      g.fillStyle(color, 0.14);
+      g.lineStyle(1.5, color, 0.8);
+      const x = zone.tileX * this.tileSize;
+      const y = zone.tileY * this.tileSize;
+      const w = zone.width * this.tileSize;
+      const h = zone.height * this.tileSize;
+      g.fillRect(x, y, w, h);
+      g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    }
+  }
+
+  private refreshSpawnMarkers() {
+    for (const marker of this.spawnMarkerMap.values()) marker.destroy();
+    this.spawnMarkerMap.clear();
+    if (!this.isStudioMode) return;
+
+    for (const spawn of getSpawnPoints(this.mapData)) {
+      const container = this.add.container(
+        spawn.tileX * this.tileSize + this.tileSize / 2,
+        spawn.tileY * this.tileSize + this.tileSize / 2
+      );
+      container.setDepth(8200);
+      const g = this.add.graphics();
+      g.fillStyle(0x22c55e, 0.9);
+      g.lineStyle(1.5, 0x052e16, 0.9);
+      g.beginPath();
+      g.moveTo(0, -6);
+      g.lineTo(6, 0);
+      g.lineTo(0, 6);
+      g.lineTo(-6, 0);
+      g.closePath();
+      g.fillPath();
+      g.strokePath();
+      const label = this.add
+        .text(0, -14, spawn.name, {
+          fontSize: '12px',
+          fontFamily: 'system-ui, sans-serif',
+          color: '#bbf7d0',
+          resolution: 2,
+        })
+        .setOrigin(0.5)
+        .setScale(0.55);
+      container.add([g, label]);
+      this.spawnMarkerMap.set(spawn.id, container);
+    }
+  }
+
+  private updateSelectionOverlay() {
+    if (!this.selectionGraphics) return;
+    const g = this.selectionGraphics;
+    g.clear();
+    if (!this.isStudioMode || !this.studioSelection) return;
+
+    let rect: { x: number; y: number; w: number; h: number } | null = null;
+    if (this.studioSelection.kind === 'object') {
+      const target = this.mapData.objects.find((o) => o.id === (this.studioSelection as { id: string }).id);
+      if (target) {
+        rect = {
+          x: target.tileX * this.tileSize,
+          y: target.tileY * this.tileSize,
+          w: target.width * this.tileSize,
+          h: target.height * this.tileSize,
+        };
+      }
+    } else if (this.studioSelection.kind === 'zone') {
+      const zone = this.mapData.interactionZones.find((z) => z.id === (this.studioSelection as { id: string }).id);
+      if (zone) {
+        rect = {
+          x: zone.tileX * this.tileSize,
+          y: zone.tileY * this.tileSize,
+          w: zone.width * this.tileSize,
+          h: zone.height * this.tileSize,
+        };
+      }
+    } else if (this.studioSelection.kind === 'spawn') {
+      const spawn = getSpawnPoints(this.mapData).find((s) => s.id === (this.studioSelection as { id: string }).id);
+      if (spawn) {
+        rect = {
+          x: spawn.tileX * this.tileSize,
+          y: spawn.tileY * this.tileSize,
+          w: this.tileSize,
+          h: this.tileSize,
+        };
+      }
+    }
+
+    if (rect) {
+      g.lineStyle(2, 0xfacc15, 0.95);
+      g.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      g.lineStyle(1, 0xfacc15, 0.4);
+      g.strokeRect(rect.x - 2.5, rect.y - 2.5, rect.w + 4, rect.h + 4);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Avatars, colleagues, bubbles
+  // -------------------------------------------------------------------------
+
   private createRagnarokNameplate(
     sprite: Phaser.Physics.Arcade.Sprite,
     displayName: string,
@@ -544,19 +1333,22 @@ export class OfficeScene extends Phaser.Scene {
     isLocalPlayer: boolean = false
   ): Phaser.GameObjects.Container {
     const container = this.add.container(sprite.x, sprite.y + 20);
-    container.setDepth(998);
-    container.setVisible(false); // Hidden by default (Ragnarok Online discipline!)
+    container.setDepth(9000);
+    container.setVisible(false);
 
     const paddingX = 6;
     const paddingY = 2;
 
-    const nameText = this.add.text(0, 0, displayName, {
-      fontSize: '16px',
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-      fontStyle: 'bold',
-      color: '#ffffff',
-      resolution: 2,
-    }).setScale(0.5).setOrigin(0.5);
+    const nameText = this.add
+      .text(0, 0, displayName, {
+        fontSize: '16px',
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        fontStyle: 'bold',
+        color: '#ffffff',
+        resolution: 2,
+      })
+      .setScale(0.5)
+      .setOrigin(0.5);
 
     const bounds = nameText.getBounds();
     const bgW = Math.max(bounds.width + paddingX * 2, 28);
@@ -570,35 +1362,26 @@ export class OfficeScene extends Phaser.Scene {
 
     container.add([bg, nameText]);
 
-    // Enable hover detection on character sprite
     sprite.setInteractive({ useHandCursor: true });
-    sprite.on('pointerover', () => {
-      container.setVisible(true);
-    });
-    sprite.on('pointerout', () => {
-      container.setVisible(false);
-    });
-    sprite.on('pointerdown', () => {
-      container.setVisible(true);
-    });
+    sprite.on('pointerover', () => container.setVisible(true));
+    sprite.on('pointerout', () => container.setVisible(false));
+    sprite.on('pointerdown', () => container.setVisible(true));
 
-    if (isLocalPlayer) {
-      this.playerNameTag = container;
-    }
-
+    if (isLocalPlayer) this.playerNameTag = container;
     return container;
   }
 
   private spawnColleague(user: UserProfile) {
     const key = `avatar_${user.id}`;
-    const cx = user.x * TILE_SIZE + TILE_SIZE / 2;
-    const cy = user.y * TILE_SIZE + TILE_SIZE / 2;
+    const cx = user.x * this.tileSize + this.tileSize / 2;
+    const cy = user.y * this.tileSize + this.tileSize / 2;
 
     const sprite = this.physics.add.sprite(cx, cy, key);
+    sprite.setScale(this.tileScale);
     sprite.setImmovable(true);
-    sprite.setSize(18, 12);
-    sprite.setOffset(7, 20);
-    sprite.setDepth(16 + user.y);
+    sprite.setSize(18 * this.tileScale, 12 * this.tileScale);
+    sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
+    sprite.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + cy + 0.25);
     sprite.play(`${key}_idle_${user.direction}`);
 
     this.physics.add.collider(this.player, sprite);
@@ -615,9 +1398,6 @@ export class OfficeScene extends Phaser.Scene {
     this.otherUserSprites.set(user.id, { sprite, nameTag, profile: user });
   }
 
-  /**
-   * Display temporary retro RPG speech bubble above avatar
-   */
   public showSpeechBubble(senderId: string, text: string, durationMs: number = 4500) {
     if (!this.isReady) return;
     let targetSprite: Phaser.Physics.Arcade.Sprite | null = null;
@@ -626,45 +1406,41 @@ export class OfficeScene extends Phaser.Scene {
       targetSprite = this.player;
     } else {
       const entry = this.otherUserSprites.get(senderId);
-      if (entry) {
-        targetSprite = entry.sprite;
-      } else if (this.remotePlayerManager) {
-        targetSprite = this.remotePlayerManager.getPlayerSprite(senderId) || null;
-      }
+      if (entry) targetSprite = entry.sprite;
+      else if (this.remotePlayerManager) targetSprite = this.remotePlayerManager.getPlayerSprite(senderId) || null;
     }
 
     if (!targetSprite) return;
 
-    // Create speech bubble container
-    const container = this.add.container(targetSprite.x, targetSprite.y - 36);
-    container.setDepth(1100);
+    const container = this.add.container(targetSprite.x, targetSprite.y - 36 * this.tileScale);
+    container.setDepth(9100);
 
     const maxWidth = 160;
-    const bubbleText = this.add.text(0, -6, text, {
-      fontSize: '16px',
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-      fontStyle: '500',
-      color: '#0f172a',
-      resolution: 2,
-      wordWrap: { width: (maxWidth - 16) * 2 },
-      align: 'center',
-    }).setScale(0.5).setOrigin(0.5);
+    const bubbleText = this.add
+      .text(0, -6, text, {
+        fontSize: '16px',
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        fontStyle: '500',
+        color: '#0f172a',
+        resolution: 2,
+        wordWrap: { width: (maxWidth - 16) * 2 },
+        align: 'center',
+      })
+      .setScale(0.5)
+      .setOrigin(0.5);
 
     const bounds = bubbleText.getBounds();
     const w = Math.max(bounds.width + 16, 48);
     const h = Math.max(bounds.height + 12, 22);
 
     const g = this.add.graphics();
-    // Bubble drop shadow
     g.fillStyle(0x000000, 0.25);
     g.fillRoundedRect(-w / 2 + 1, -h / 2 - 5 + 1, w, h, 6);
-    // Bubble body (crisp white)
     g.fillStyle(0xffffff, 0.98);
     g.lineStyle(1, 0x64748b, 0.6);
     g.fillRoundedRect(-w / 2, -h / 2 - 5, w, h, 6);
     g.strokeRoundedRect(-w / 2, -h / 2 - 5, w, h, 6);
 
-    // Speech bubble tail pointing down to head
     g.fillStyle(0xffffff, 0.98);
     g.beginPath();
     g.moveTo(-4, h / 2 - 5);
@@ -682,7 +1458,6 @@ export class OfficeScene extends Phaser.Scene {
     };
     this.activeSpeechBubbles.push(activeBubble);
 
-    // Auto fade out
     this.time.delayedCall(durationMs - 400, () => {
       this.tweens.add({
         targets: container,
@@ -697,9 +1472,6 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
-  /**
-   * Display temporary emoji reaction bubble over avatar
-   */
   public showReactionBubble(senderId: string, emoji: string, durationMs: number = 3200) {
     if (!this.isReady) return;
     let targetSprite: Phaser.Physics.Arcade.Sprite | null = null;
@@ -708,42 +1480,33 @@ export class OfficeScene extends Phaser.Scene {
       targetSprite = this.player;
     } else {
       const entry = this.otherUserSprites.get(senderId);
-      if (entry) {
-        targetSprite = entry.sprite;
-      } else if (this.remotePlayerManager) {
-        targetSprite = this.remotePlayerManager.getPlayerSprite(senderId) || null;
-      }
+      if (entry) targetSprite = entry.sprite;
+      else if (this.remotePlayerManager) targetSprite = this.remotePlayerManager.getPlayerSprite(senderId) || null;
     }
 
     if (!targetSprite) return;
 
-    // Audio cue
     sounds.playReactionPop();
 
-    // Clean up any existing reaction bubble for this avatar
     const existing = this.activeReactionBubbles.get(senderId);
     if (existing) {
       existing.container.destroy();
       this.activeReactionBubbles.delete(senderId);
     }
 
-    const container = this.add.container(targetSprite.x, targetSprite.y - 42);
-    container.setDepth(1150);
+    const container = this.add.container(targetSprite.x, targetSprite.y - 42 * this.tileScale);
+    container.setDepth(9200);
     container.setScale(0.15);
     container.setAlpha(0.2);
 
-    // Graphic bubble circle with tail
     const g = this.add.graphics();
-    // Drop shadow
     g.fillStyle(0x000000, 0.35);
     g.fillCircle(1, 2, 20);
-    // Bubble body - crisp white with subtle Indigo accent ring
     g.fillStyle(0xffffff, 0.98);
     g.lineStyle(2, 0x6366f1, 0.9);
     g.fillCircle(0, 0, 19);
     g.strokeCircle(0, 0, 19);
 
-    // Bubble pointer nub down to head
     g.beginPath();
     g.moveTo(-4, 16);
     g.lineTo(0, 23);
@@ -752,13 +1515,14 @@ export class OfficeScene extends Phaser.Scene {
     g.fill();
     g.stroke();
 
-    // High-resolution emoji text
-    const emojiText = this.add.text(0, -1, emoji, {
-      fontSize: '24px',
-      fontFamily: "'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif",
-      resolution: 2,
-      align: 'center',
-    }).setOrigin(0.5);
+    const emojiText = this.add
+      .text(0, -1, emoji, {
+        fontSize: '24px',
+        fontFamily: "'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif",
+        resolution: 2,
+        align: 'center',
+      })
+      .setOrigin(0.5);
 
     container.add([g, emojiText]);
 
@@ -767,11 +1531,10 @@ export class OfficeScene extends Phaser.Scene {
       targetSprite,
       userId: senderId,
       expiresAt: Date.now() + durationMs,
-      offsetY: -42,
+      offsetY: -42 * this.tileScale,
     };
     this.activeReactionBubbles.set(senderId, bubbleData);
 
-    // Pop-in bounce animation
     this.tweens.add({
       targets: container,
       scale: 1.15,
@@ -779,24 +1542,17 @@ export class OfficeScene extends Phaser.Scene {
       duration: 140,
       ease: 'Back.easeOut',
       onComplete: () => {
-        this.tweens.add({
-          targets: container,
-          scale: 1.0,
-          duration: 90,
-          ease: 'Sine.easeOut',
-        });
+        this.tweens.add({ targets: container, scale: 1.0, duration: 90, ease: 'Sine.easeOut' });
       },
     });
 
-    // Gentle float upwards over lifetime
     this.tweens.add({
       targets: bubbleData,
-      offsetY: -50,
+      offsetY: bubbleData.offsetY - 8,
       duration: durationMs - 400,
       ease: 'Sine.easeOut',
     });
 
-    // Fade out and cleanup
     this.time.delayedCall(durationMs - 400, () => {
       this.tweens.add({
         targets: container,
@@ -816,73 +1572,519 @@ export class OfficeScene extends Phaser.Scene {
 
   private createFloatingPrompt() {
     this.promptTag = this.add.container(0, 0);
-    this.promptTag.setDepth(1000);
+    this.promptTag.setDepth(8600);
     this.promptTag.setVisible(false);
 
-    // Compact, refined pill: 84px wide by 18px high
     const bg = this.add.graphics();
     bg.fillStyle(0x0f172a, 0.95);
     bg.lineStyle(1, 0x6366f1, 0.9);
-    bg.fillRoundedRect(-42, -9, 84, 18, 3);
-    bg.strokeRoundedRect(-42, -9, 84, 18, 3);
+    bg.fillRoundedRect(-52, -10, 104, 20, 3);
+    bg.strokeRoundedRect(-52, -10, 104, 20, 3);
 
-    const text = this.add.text(0, 0, 'Press [E] Interact', {
-      fontSize: '15px',
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-      fontStyle: 'bold',
-      color: '#c7d2fe',
-      resolution: 2,
-    }).setScale(0.5).setOrigin(0.5);
+    const text = this.add
+      .text(0, 0, 'Press [E] Interact', {
+        fontSize: '15px',
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        fontStyle: 'bold',
+        color: '#c7d2fe',
+        resolution: 2,
+      })
+      .setScale(0.5)
+      .setOrigin(0.5);
 
     this.promptTag.add([bg, text]);
   }
 
-  private setupPointerAndEditorEvents() {
-    this.clickIndicatorGraphics = this.add.graphics();
-    this.clickIndicatorGraphics.setDepth(994);
+  // -------------------------------------------------------------------------
+  // Pointer handling (gameplay + studio)
+  // -------------------------------------------------------------------------
 
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      // In editor mode, pointer down edits the map
-      if (this.isEditorMode) {
-        this.isPointerDownForPainting = true;
-        this.applyEditorActionAtPointer(pointer);
+  private pointerToTile(pointer: Phaser.Input.Pointer): { tx: number; ty: number; inside: boolean } {
+    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const tx = Math.floor(worldPoint.x / this.tileSize);
+    const ty = Math.floor(worldPoint.y / this.tileSize);
+    const inside = tx >= 0 && ty >= 0 && tx < this.mapData.width && ty < this.mapData.height;
+    return { tx, ty, inside };
+  }
+
+  private setupPointerEvents() {
+    this.clickIndicatorGraphics = this.add.graphics();
+    this.clickIndicatorGraphics.setDepth(8400);
+
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer));
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer));
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer));
+    this.input.on('wheel', (_p: Phaser.Input.Pointer, _objects: unknown, _dx: number, dy: number) => {
+      if (!this.isStudioMode) return;
+      const current = this.cameras.main.zoom;
+      const next = Phaser.Math.Clamp(current - dy * 0.0012, 0.6, 4);
+      this.cameras.main.setZoom(next);
+      this.studioSettings.zoom = next;
+      this.callbacks.onZoomChange?.(next);
+    });
+  }
+
+  private isMiddleOrRightButton(pointer: Phaser.Input.Pointer): boolean {
+    return pointer.middleButtonDown() || pointer.rightButtonDown();
+  }
+
+  private onPointerDown(pointer: Phaser.Input.Pointer) {
+    // Middle/right button: pan in studio, ignore in world mode.
+    if (this.isMiddleOrRightButton(pointer)) {
+      if (this.isStudioMode) this.beginPan(pointer);
+      else if (pointer.rightButtonDown() && !this.isStudioMode) return;
+      return;
+    }
+
+    if (!this.isStudioMode) {
+      if (!this.isControlsEnabled || pointer.button !== 0) return;
+      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const clamped = this.clampToWalkable(worldPoint.x, worldPoint.y);
+      this.clickTargetPos = { x: clamped.x, y: clamped.y };
+      this.drawClickTargetIndicator(clamped.x, clamped.y);
+      return;
+    }
+
+    const { tx, ty, inside } = this.pointerToTile(pointer);
+    if (!inside) return;
+
+    const tool = this.studioSettings.activeTool;
+    if (tool === 'pan') {
+      this.beginPan(pointer);
+      return;
+    }
+
+    if (tool === 'select') {
+      this.beginSelectionDrag(tx, ty);
+      return;
+    }
+
+    this.isPointerDownForEditing = true;
+    if (tool === 'paint' || tool === 'erase' || tool === 'collision') {
+      this.strokeIsErasing = tool === 'erase' || (tool === 'collision' && this.isCellSolid(tx, ty));
+      this.applyStrokeAt(tx, ty);
+    } else if (tool === 'object') {
+      this.placeObjectAt(tx, ty);
+      this.isPointerDownForEditing = false;
+    } else if (tool === 'spawn') {
+      this.placeSpawnAt(tx, ty);
+      this.isPointerDownForEditing = false;
+    }
+  }
+
+  private onPointerUp(_pointer: Phaser.Input.Pointer) {
+    if (this.isPanning) {
+      this.isPanning = false;
+      return;
+    }
+    if (this.dragState.active) {
+      this.finishSelectionDrag();
+      return;
+    }
+    if (this.isPointerDownForEditing) {
+      this.isPointerDownForEditing = false;
+      this.flushStrokeTransaction();
+    }
+  }
+
+  private onPointerMove(pointer: Phaser.Input.Pointer) {
+    if (!this.mapData) return;
+
+    if (this.isPanning) {
+      const cam = this.cameras.main;
+      cam.stopFollow();
+      const zoom = cam.zoom;
+      cam.scrollX = this.panPointerStart.scrollX - (pointer.x - this.panPointerStart.x) / zoom;
+      cam.scrollY = this.panPointerStart.scrollY - (pointer.y - this.panPointerStart.y) / zoom;
+      return;
+    }
+
+    const { tx, ty, inside } = this.pointerToTile(pointer);
+
+    if (this.isStudioMode) {
+      if (!this.lastCursorTile || this.lastCursorTile.x !== tx || this.lastCursorTile.y !== ty || !inside) {
+        this.lastCursorTile = { x: tx, y: ty };
+        this.callbacks.onCursorMove?.(tx, ty, inside);
+      }
+
+      if (this.dragState.active) {
+        this.updateSelectionDrag(tx, ty);
         return;
       }
 
-      // Normal gameplay: Click-to-move!
-      // Only trigger if controls are enabled and left button clicked
-      if (!this.isControlsEnabled || pointer.button !== 0) return;
+      this.drawHoverBox(tx, ty, inside);
 
-      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-      const clampedX = Phaser.Math.Clamp(worldPoint.x, 16, this.mapData.width * TILE_SIZE - 16);
-      const clampedY = Phaser.Math.Clamp(worldPoint.y, 16, this.mapData.height * TILE_SIZE - 16);
+      if (this.isPointerDownForEditing && inside && (this.studioSettings.activeTool === 'paint' || this.studioSettings.activeTool === 'erase' || this.studioSettings.activeTool === 'collision')) {
+        this.applyStrokeAt(tx, ty);
+      }
+    }
+  }
 
-      this.clickTargetPos = { x: clampedX, y: clampedY };
-      this.drawClickTargetIndicator(clampedX, clampedY);
-    });
+  private beginPan(pointer: Phaser.Input.Pointer) {
+    this.isPanning = true;
+    this.cameras.main.stopFollow();
+    this.panPointerStart = {
+      x: pointer.x,
+      y: pointer.y,
+      scrollX: this.cameras.main.scrollX,
+      scrollY: this.cameras.main.scrollY,
+    };
+  }
 
-    this.input.on('pointerup', () => {
-      this.isPointerDownForPainting = false;
-    });
+  private drawHoverBox(tx: number, ty: number, inside: boolean) {
+    if (!this.hoverGraphics) return;
+    const g = this.hoverGraphics;
+    g.clear();
+    if (!inside) return;
+    const size = Phaser.Math.Clamp(this.studioSettings.brushSize || 1, 1, 6);
+    const half = Math.floor((size - 1) / 2);
+    const x0 = (tx - half) * this.tileSize;
+    const y0 = (ty - half) * this.tileSize;
+    g.lineStyle(1.5, 0xfacc15, 0.95);
+    g.strokeRect(x0 + 0.5, y0 + 0.5, size * this.tileSize - 1, size * this.tileSize - 1);
+  }
 
-    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (!this.isEditorMode || !this.mapData) return;
+  // -------------------------------------------------------------------------
+  // Studio tools
+  // -------------------------------------------------------------------------
 
-      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-      const tx = Math.floor(worldPoint.x / TILE_SIZE);
-      const ty = Math.floor(worldPoint.y / TILE_SIZE);
+  private isLayerLocked(layerId: string | null): boolean {
+    if (!layerId) return true;
+    const layer = (this.mapData.layers || []).find((l) => l.id === layerId);
+    return !layer || layer.locked || !layer.visible;
+  }
 
-      if (tx >= 0 && tx < this.mapData.width && ty >= 0 && ty < this.mapData.height) {
-        this.editorHoverBox.clear();
-        this.editorHoverBox.lineStyle(1, 0xfacc15, 0.9);
-        this.editorHoverBox.strokeRect(tx * TILE_SIZE + 0.5, ty * TILE_SIZE + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+  private isCellSolid(tx: number, ty: number): boolean {
+    return getCollisionMask(this.mapData)[ty]?.[tx] === true;
+  }
 
-        if (this.isPointerDownForPainting) {
-          this.applyEditorActionAtPointer(pointer);
+  private brushCells(tx: number, ty: number): Array<{ x: number; y: number }> {
+    const size = Phaser.Math.Clamp(this.studioSettings.brushSize || 1, 1, 6);
+    const half = Math.floor((size - 1) / 2);
+    const cells: Array<{ x: number; y: number }> = [];
+    for (let dy = 0; dy < size; dy++) {
+      for (let dx = 0; dx < size; dx++) {
+        const x = tx - half + dx;
+        const y = ty - half + dy;
+        if (x >= 0 && y >= 0 && x < this.mapData.width && y < this.mapData.height) cells.push({ x, y });
+      }
+    }
+    return cells;
+  }
+
+  private applyStrokeAt(tx: number, ty: number) {
+    const tool = this.studioSettings.activeTool;
+    if (tool === 'collision') {
+      this.applyCollisionStroke(tx, ty);
+      return;
+    }
+    this.applyTileStroke(tx, ty);
+  }
+
+  private applyTileStroke(tx: number, ty: number) {
+    const layerId = this.studioSettings.activeLayerId;
+    if (!layerId || this.isLayerLocked(layerId)) return;
+    const layer = (this.mapData.layers || []).find((l) => l.id === layerId);
+    if (!layer || layer.kind !== 'tiles' || !layer.tiles) return;
+
+    const newTileId = this.studioSettings.activeTool === 'erase' ? -1 : this.studioSettings.selectedTileId;
+    const paintCollision =
+      this.studioSettings.paintCollisionWithWalls && layer.depthMode === 'row' && newTileId >= 0;
+
+    let list = this.pendingTileChanges.get(layerId);
+    if (!list) {
+      list = [];
+      this.pendingTileChanges.set(layerId, list);
+    }
+
+    for (const cell of this.brushCells(tx, ty)) {
+      const prev = layer.tiles[cell.y]?.[cell.x] ?? -1;
+      if (prev === newTileId) continue;
+      layer.tiles[cell.y][cell.x] = newTileId;
+      list.push({ x: cell.x, y: cell.y, prev, next: newTileId });
+      this.markCellDirty(layer, cell.x, cell.y);
+
+      if (layer.depthMode === 'row') {
+        // Auto collision for wall-like layers (both painting and erasing)
+        if (paintCollision) {
+          if (!this.isCellSolid(cell.x, cell.y)) {
+            this.pendingCollisionChanges.push({ x: cell.x, y: cell.y, prev: false, next: true });
+            const collLayer = getCollisionLayer(this.mapData);
+            if (collLayer?.mask) collLayer.mask[cell.y][cell.x] = true;
+            this.updateCollisionCell(cell.x, cell.y);
+          }
+        } else if (newTileId < 0 && this.isCellSolid(cell.x, cell.y)) {
+          this.pendingCollisionChanges.push({ x: cell.x, y: cell.y, prev: true, next: false });
+          const collLayer = getCollisionLayer(this.mapData);
+          if (collLayer?.mask) collLayer.mask[cell.y][cell.x] = false;
+          this.updateCollisionCell(cell.x, cell.y);
         }
       }
-    });
+    }
+    this.updateCollisionOverlay();
   }
+
+  private applyCollisionStroke(tx: number, ty: number) {
+    const collLayer = getCollisionLayer(this.mapData);
+    if (!collLayer?.mask || collLayer.locked) return;
+    const targetSolid = !this.strokeIsErasing;
+    for (const cell of this.brushCells(tx, ty)) {
+      const prev = collLayer.mask[cell.y]?.[cell.x] === true;
+      if (prev === targetSolid) continue;
+      collLayer.mask[cell.y][cell.x] = targetSolid;
+      this.pendingCollisionChanges.push({ x: cell.x, y: cell.y, prev, next: targetSolid });
+      this.updateCollisionCell(cell.x, cell.y);
+    }
+    this.updateCollisionOverlay();
+  }
+
+  private placeObjectAt(tx: number, ty: number) {
+    const ref = this.studioSettings.selectedObject;
+    if (!ref) return;
+
+    const removed: EditCommand[] = [];
+    for (const obj of [...this.mapData.objects]) {
+      if (obj.tileX === tx && obj.tileY === ty) {
+        applyCommand(this.mapData, { kind: 'object.remove', object: obj });
+        removed.push({ kind: 'object.remove', object: obj });
+      }
+    }
+
+    const id = `obj_${Date.now().toString(36)}_${Math.floor(Math.random() * 0xffff).toString(36)}`;
+    const object: MapObject =
+      ref.kind === 'builtin'
+        ? {
+            id,
+            type: ref.type,
+            tileX: tx,
+            tileY: ty,
+            width: 1,
+            height: 1,
+            isSolid: ref.type !== 'chair_office' && ref.type !== 'door_warp',
+          }
+        : {
+            id,
+            type: 'asset',
+            assetId: ref.assetId,
+            frame: ref.frame,
+            tileX: tx,
+            tileY: ty,
+            width: Math.max(1, ref.widthTiles),
+            height: Math.max(1, ref.heightTiles),
+            isSolid: true,
+          };
+
+    applyCommand(this.mapData, { kind: 'object.add', object });
+    this.pendingObjectCommands.push(...removed, { kind: 'object.add', object });
+    this.refreshObjects();
+    this.refreshCollisionBodies();
+    this.updateCollisionOverlay();
+  }
+
+  private placeSpawnAt(tx: number, ty: number) {
+    const existing = getSpawnPoints(this.mapData);
+    const spawn = {
+      id: `spawn_${Date.now().toString(36)}`,
+      name: `Spawn ${existing.length + 1}`,
+      tileX: tx,
+      tileY: ty,
+      direction: 'down' as Direction,
+    };
+    applyCommand(this.mapData, { kind: 'spawn.add', spawn });
+    this.pendingSpawnCommands.push({ kind: 'spawn.add', spawn });
+    this.refreshSpawnMarkers();
+  }
+
+  private flushStrokeTransaction() {
+    const commands: EditCommand[] = [];
+    for (const [layerId, changes] of this.pendingTileChanges) {
+      if (changes.length > 0) commands.push({ kind: 'tiles', layerId, changes });
+    }
+    if (this.pendingCollisionChanges.length > 0) {
+      commands.push({ kind: 'collision', changes: this.pendingCollisionChanges });
+    }
+    commands.push(...this.pendingObjectCommands, ...this.pendingZoneCommands, ...this.pendingSpawnCommands);
+
+    this.pendingTileChanges.clear();
+    this.pendingCollisionChanges = [];
+    this.pendingObjectCommands = [];
+    this.pendingZoneCommands = [];
+    this.pendingSpawnCommands = [];
+
+    if (commands.length > 0 && this.callbacks.onEditTransaction) {
+      this.callbacks.onEditTransaction(commands);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Selection + drag
+  // -------------------------------------------------------------------------
+
+  private hitTestSelectable(tx: number, ty: number): StudioSelection {
+    // Topmost object first, then zones, then spawns.
+    for (let i = this.mapData.objects.length - 1; i >= 0; i--) {
+      const obj = this.mapData.objects[i];
+      if (tx >= obj.tileX && tx < obj.tileX + obj.width && ty >= obj.tileY && ty < obj.tileY + obj.height) {
+        return { kind: 'object', id: obj.id };
+      }
+    }
+    for (const zone of this.mapData.interactionZones) {
+      if (tx >= zone.tileX && tx < zone.tileX + zone.width && ty >= zone.tileY && ty < zone.tileY + zone.height) {
+        return { kind: 'zone', id: zone.id };
+      }
+    }
+    for (const spawn of getSpawnPoints(this.mapData)) {
+      if (spawn.tileX === tx && spawn.tileY === ty) return { kind: 'spawn', id: spawn.id };
+    }
+    return null;
+  }
+
+  private beginSelectionDrag(tx: number, ty: number) {
+    const hit = this.hitTestSelectable(tx, ty);
+    this.studioSelection = hit;
+    this.callbacks.onSelectionChange?.(hit);
+    this.updateSelectionOverlay();
+    if (!hit) return;
+
+    let anchorX = tx;
+    let anchorY = ty;
+    if (hit.kind === 'object') {
+      const obj = this.mapData.objects.find((o) => o.id === hit.id);
+      if (obj) {
+        anchorX = obj.tileX;
+        anchorY = obj.tileY;
+      }
+    } else if (hit.kind === 'zone') {
+      const zone = this.mapData.interactionZones.find((z) => z.id === hit.id);
+      if (zone) {
+        anchorX = zone.tileX;
+        anchorY = zone.tileY;
+      }
+    } else {
+      const spawn = getSpawnPoints(this.mapData).find((s) => s.id === hit.id);
+      if (spawn) {
+        anchorX = spawn.tileX;
+        anchorY = spawn.tileY;
+      }
+    }
+
+    this.dragState = {
+      active: true,
+      kind: hit.kind,
+      id: hit.id,
+      offsetX: tx - anchorX,
+      offsetY: ty - anchorY,
+      ghostX: anchorX,
+      ghostY: anchorY,
+      moved: false,
+    };
+  }
+
+  private updateSelectionDrag(tx: number, ty: number) {
+    const drag = this.dragState;
+    if (!drag.active || !drag.id) return;
+    const nx = tx - drag.offsetX;
+    const ny = ty - drag.offsetY;
+    if (nx === drag.ghostX && ny === drag.ghostY) return;
+    drag.ghostX = nx;
+    drag.ghostY = ny;
+    drag.moved = true;
+
+    // Visual feedback: move the sprite/marker with the pointer.
+    if (drag.kind === 'object') {
+      const img = this.objectImageMap.get(drag.id);
+      const obj = this.mapData.objects.find((o) => o.id === drag.id);
+      if (img && obj) {
+        img.setPosition(
+          nx * this.tileSize + (obj.width * this.tileSize) / 2,
+          ny * this.tileSize + (obj.height * this.tileSize) / 2
+        );
+      }
+    } else if (drag.kind === 'spawn') {
+      const marker = this.spawnMarkerMap.get(drag.id);
+      if (marker) {
+        marker.setPosition(nx * this.tileSize + this.tileSize / 2, ny * this.tileSize + this.tileSize / 2);
+      }
+    }
+    this.updateSelectionOverlayFromGhost(nx, ny);
+  }
+
+  private updateSelectionOverlayFromGhost(tx: number, ty: number) {
+    if (!this.selectionGraphics) return;
+    const g = this.selectionGraphics;
+    g.clear();
+    g.lineStyle(2, 0xfacc15, 0.95);
+    g.strokeRect(tx * this.tileSize + 0.5, ty * this.tileSize + 0.5, this.tileSize - 1, this.tileSize - 1);
+  }
+
+  private finishSelectionDrag() {
+    const drag = this.dragState;
+    this.dragState = {
+      active: false,
+      kind: null,
+      id: null,
+      offsetX: 0,
+      offsetY: 0,
+      ghostX: 0,
+      ghostY: 0,
+      moved: false,
+    };
+    if (!drag.active || !drag.id || !drag.moved) {
+      this.updateSelectionOverlay();
+      return;
+    }
+
+    let command: EditCommand | null = null;
+    if (drag.kind === 'object') {
+      const obj = this.mapData.objects.find((o) => o.id === drag.id);
+      if (obj) {
+        command = {
+          kind: 'object.update',
+          id: obj.id,
+          prev: { tileX: obj.tileX, tileY: obj.tileY },
+          next: { tileX: drag.ghostX, tileY: drag.ghostY },
+        };
+      }
+    } else if (drag.kind === 'zone') {
+      const zone = this.mapData.interactionZones.find((z) => z.id === drag.id);
+      if (zone) {
+        command = {
+          kind: 'zone.update',
+          id: zone.id,
+          prev: { tileX: zone.tileX, tileY: zone.tileY },
+          next: { tileX: drag.ghostX, tileY: drag.ghostY },
+        };
+      }
+    } else if (drag.kind === 'spawn') {
+      const spawn = getSpawnPoints(this.mapData).find((s) => s.id === drag.id);
+      if (spawn) {
+        command = {
+          kind: 'spawn.update',
+          id: spawn.id,
+          prev: { tileX: spawn.tileX, tileY: spawn.tileY },
+          next: { tileX: drag.ghostX, tileY: drag.ghostY },
+        };
+      }
+    }
+
+    if (command) {
+      applyCommand(this.mapData, command);
+      this.callbacks.onEditTransaction?.([command]);
+      this.refreshObjects();
+      this.refreshZoneVisuals();
+      this.refreshSpawnMarkers();
+      this.updateSelectionOverlay();
+    }
+  }
+
+  private clearSelectionInternal() {
+    this.studioSelection = null;
+    if (this.selectionGraphics) this.selectionGraphics.clear();
+  }
+
+  // -------------------------------------------------------------------------
+  // Gameplay
+  // -------------------------------------------------------------------------
 
   private drawClickTargetIndicator(x: number, y: number) {
     if (!this.clickIndicatorGraphics) return;
@@ -892,7 +2094,6 @@ export class OfficeScene extends Phaser.Scene {
     this.clickIndicatorGraphics.fillStyle(0x38bdf8, 0.35);
     this.clickIndicatorGraphics.fillCircle(x, y, 3);
 
-    // Fade out effect
     this.tweens.add({
       targets: this.clickIndicatorGraphics,
       alpha: 0,
@@ -906,147 +2107,7 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
-  private applyEditorActionAtPointer(pointer: Phaser.Input.Pointer) {
-    if (!this.isEditorMode || !this.mapData) return;
-
-    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const tx = Math.floor(worldPoint.x / TILE_SIZE);
-    const ty = Math.floor(worldPoint.y / TILE_SIZE);
-
-    if (tx < 0 || tx >= this.mapData.width || ty < 0 || ty >= this.mapData.height) return;
-
-    const tool = this.editorSettings.activeTool;
-    let modified = false;
-
-    if (tool === 'brush_floor') {
-      const tileId = this.editorSettings.selectedFloorTile;
-      if (this.mapData.floorTiles[ty][tx] !== tileId) {
-        this.mapData.floorTiles[ty][tx] = tileId;
-        const floorKeyMap: Record<number, string> = {
-          0: 'tile_wood',
-          1: 'tile_carpet_blue',
-          2: 'tile_gray',
-          3: 'tile_checkered',
-          4: 'tile_deck',
-          5: 'tile_grass',
-        };
-        const key = floorKeyMap[tileId] || 'tile_wood';
-        const img = this.floorImageMap.get(`${tx},${ty}`);
-        if (img) {
-          img.setTexture(key);
-        }
-        modified = true;
-      }
-    } else if (tool === 'brush_wall') {
-      const wallId = this.editorSettings.selectedWallTile;
-      if (this.mapData.wallTiles[ty][tx] !== wallId) {
-        this.mapData.wallTiles[ty][tx] = wallId;
-        const wallKeyMap: Record<number, string> = {
-          10: 'wall_top',
-          11: 'wall_face',
-          12: 'wall_window',
-          13: 'wall_glass',
-        };
-        const key = wallKeyMap[wallId] || 'wall_face';
-        let img = this.wallImageMap.get(`${tx},${ty}`);
-        if (!img) {
-          img = this.add.image(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2, key);
-          img.setDepth(10 + ty);
-          this.wallImageMap.set(`${tx},${ty}`, img);
-        } else {
-          img.setTexture(key);
-        }
-        // Auto mark wall as solid
-        this.mapData.solidMask[ty][tx] = true;
-        this.createCollisionBlock(tx, ty);
-        this.updateCollisionOverlay();
-        modified = true;
-      }
-    } else if (tool === 'erase_tile') {
-      if (this.mapData.wallTiles[ty][tx] > 0) {
-        this.mapData.wallTiles[ty][tx] = 0;
-        const img = this.wallImageMap.get(`${tx},${ty}`);
-        if (img) {
-          img.destroy();
-          this.wallImageMap.delete(`${tx},${ty}`);
-        }
-        this.mapData.solidMask[ty][tx] = false;
-        this.removeCollisionBlock(tx, ty);
-        this.updateCollisionOverlay();
-        modified = true;
-      }
-    } else if (tool === 'place_object') {
-      const objType = this.editorSettings.selectedObjectType;
-      const objId = `obj_${tx}_${ty}_${Date.now()}`;
-      // Remove any existing object on this tile
-      this.removeObjectAt(tx, ty);
-
-      const newObj: MapObject = {
-        id: objId,
-        type: objType,
-        tileX: tx,
-        tileY: ty,
-        width: 1,
-        height: 1,
-        isSolid: objType !== 'chair_office' && objType !== 'door_warp',
-      };
-      this.mapData.objects.push(newObj);
-
-      const img = this.add.image(
-        tx * TILE_SIZE + TILE_SIZE / 2,
-        ty * TILE_SIZE + TILE_SIZE / 2,
-        objType
-      );
-      img.setDepth(15 + ty);
-      this.objectImageMap.set(objId, img);
-
-      if (newObj.isSolid) {
-        this.mapData.solidMask[ty][tx] = true;
-        this.createCollisionBlock(tx, ty);
-        this.updateCollisionOverlay();
-      }
-      modified = true;
-    } else if (tool === 'delete_object') {
-      modified = this.removeObjectAt(tx, ty);
-    } else if (tool === 'toggle_collision') {
-      const currentState = this.mapData.solidMask[ty][tx];
-      this.mapData.solidMask[ty][tx] = !currentState;
-      if (!currentState) {
-        this.createCollisionBlock(tx, ty);
-      } else {
-        this.removeCollisionBlock(tx, ty);
-      }
-      this.updateCollisionOverlay();
-      modified = true;
-    }
-
-    if (modified && this.callbacks.onMapModified) {
-      this.callbacks.onMapModified({ ...this.mapData });
-    }
-  }
-
-  private removeObjectAt(tx: number, ty: number): boolean {
-    const idx = this.mapData.objects.findIndex((o) => o.tileX === tx && o.tileY === ty);
-    if (idx !== -1) {
-      const obj = this.mapData.objects[idx];
-      this.mapData.objects.splice(idx, 1);
-      const img = this.objectImageMap.get(obj.id);
-      if (img) {
-        img.destroy();
-        this.objectImageMap.delete(obj.id);
-      }
-      if (obj.isSolid) {
-        this.mapData.solidMask[ty][tx] = false;
-        this.removeCollisionBlock(tx, ty);
-        this.updateCollisionOverlay();
-      }
-      return true;
-    }
-    return false;
-  }
-
   private handleInteractionPress() {
-    // Crucial: Check if an input, textarea, or contenteditable is focused
     const activeEl = document.activeElement as HTMLElement | null;
     if (
       activeEl &&
@@ -1058,11 +2119,10 @@ export class OfficeScene extends Phaser.Scene {
     ) {
       return;
     }
-    if (!this.isControlsEnabled) return;
+    if (!this.isControlsEnabled || this.isStudioMode) return;
 
     if (this.currentNearbyZone) {
       if (this.currentNearbyZone.type === 'door_warp' && this.currentNearbyZone.warpTarget) {
-        const { mapId, spawnTileX, spawnTileY } = this.currentNearbyZone.warpTarget;
         this.callbacks.onZoneChange(null);
         this.callbacks.onInteract(this.currentNearbyZone);
       } else {
@@ -1073,22 +2133,30 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    // Flush dirty ground chunks once per frame
+    if (this.dirtyChunks.size > 0) {
+      const chunk = this.chunkSizeTiles();
+      for (const key of Array.from(this.dirtyChunks)) {
+        const [layerId, coords] = key.split(':');
+        const [cxStr, cyStr] = coords.split(',');
+        const layer = (this.mapData.layers || []).find((l) => l.id === layerId);
+        if (layer) this.rebuildChunk(layer, parseInt(cxStr, 10), parseInt(cyStr, 10), chunk);
+      }
+      this.dirtyChunks.clear();
+    }
+
     if (!this.player || this.isWarping) return;
 
-    // Frame-rate independent movement calculation:
-    // Base speed in pixels per second:
-    const baseSpeed = 135 * this.speedMultiplier;
+    const baseSpeed = 135 * this.tileScale * this.speedMultiplier;
     const isShiftDown =
       this.isControlsEnabled &&
-      ((this.cursors.shift && this.cursors.shift.isDown) ||
-        (this.shiftKey && this.shiftKey.isDown));
+      ((this.cursors.shift && this.cursors.shift.isDown) || (this.shiftKey && this.shiftKey.isDown));
     const speed = isShiftDown ? baseSpeed * 1.55 : baseSpeed;
 
     let vx = 0;
     let vy = 0;
     let newDir: Direction = this.playerProfile.direction;
 
-    // Check if an input element in DOM is currently focused
     const activeEl = document.activeElement as HTMLElement | null;
     const isInputActive =
       activeEl &&
@@ -1098,9 +2166,8 @@ export class OfficeScene extends Phaser.Scene {
         activeEl.isContentEditable ||
         (activeEl.closest && activeEl.closest('input, textarea, [contenteditable="true"]')));
 
-    const controlsAllowed = this.isControlsEnabled && !isInputActive;
+    const controlsAllowed = this.isControlsEnabled && !isInputActive && !this.isStudioMode;
 
-    // Arrow keys movement
     const arrowLeft = controlsAllowed && this.cursors.left.isDown;
     const arrowRight = controlsAllowed && this.cursors.right.isDown;
     const arrowUp = controlsAllowed && this.cursors.up.isDown;
@@ -1109,9 +2176,7 @@ export class OfficeScene extends Phaser.Scene {
     const isKeyboardMoving = arrowLeft || arrowRight || arrowUp || arrowDown;
 
     if (isKeyboardMoving) {
-      // Keyboard input overrides active click-to-move destination
       this.clickTargetPos = null;
-
       if (arrowLeft) {
         vx = -speed;
         newDir = 'left';
@@ -1119,7 +2184,6 @@ export class OfficeScene extends Phaser.Scene {
         vx = speed;
         newDir = 'right';
       }
-
       if (arrowUp) {
         vy = -speed;
         newDir = 'up';
@@ -1127,47 +2191,30 @@ export class OfficeScene extends Phaser.Scene {
         vy = speed;
         newDir = 'down';
       }
-
-      // Normalized diagonal speed
       if (vx !== 0 && vy !== 0) {
         vx *= 0.70710678;
         vy *= 0.70710678;
       }
     } else if (controlsAllowed && this.clickTargetPos) {
-      // Click-to-move path interpolation
       const dx = this.clickTargetPos.x - this.player.x;
       const dy = this.clickTargetPos.y - this.player.y;
       const dist = Math.hypot(dx, dy);
-
       if (dist < 3) {
-        // Arrived at destination
         this.clickTargetPos = null;
-        vx = 0;
-        vy = 0;
       } else {
         vx = (dx / dist) * speed;
         vy = (dy / dist) * speed;
-
-        if (Math.abs(dx) > Math.abs(dy)) {
-          newDir = dx > 0 ? 'right' : 'left';
-        } else {
-          newDir = dy > 0 ? 'down' : 'up';
-        }
+        if (Math.abs(dx) > Math.abs(dy)) newDir = dx > 0 ? 'right' : 'left';
+        else newDir = dy > 0 ? 'down' : 'up';
       }
     }
 
     this.player.setVelocity(vx, vy);
-
     const isMoving = vx !== 0 || vy !== 0;
 
-    // Dynamic depth sorting for player
-    this.player.setDepth(16 + Math.floor(this.player.y / TILE_SIZE));
+    this.player.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + this.player.y + 0.3);
 
-    // Animation cycle
-    const animKey = isMoving
-      ? `player_avatar_walk_${newDir}`
-      : `player_avatar_idle_${newDir}`;
-
+    const animKey = isMoving ? `player_avatar_walk_${newDir}` : `player_avatar_idle_${newDir}`;
     if (this.player.anims.currentAnim?.key !== animKey) {
       this.player.play(animKey, true);
     }
@@ -1175,7 +2222,6 @@ export class OfficeScene extends Phaser.Scene {
     this.playerProfile.direction = newDir;
     this.playerProfile.isMoving = isMoving;
 
-    // Footstep audio
     if (isMoving) {
       const stepInterval = isShiftDown ? 180 : 280;
       if (time - this.lastFootstepTime > stepInterval) {
@@ -1184,21 +2230,18 @@ export class OfficeScene extends Phaser.Scene {
       }
     }
 
-    // Follow player with Ragnarok nameplate
     if (this.playerNameTag) {
-      this.playerNameTag.setPosition(this.player.x, this.player.y + 20);
+      this.playerNameTag.setPosition(this.player.x, this.player.y + 20 * this.tileScale);
       this.playerNameTag.setDepth(this.player.depth + 10);
     }
 
-    // Follow target sprites for active speech bubbles
     this.activeSpeechBubbles.forEach((bubble) => {
       if (bubble.targetSprite && bubble.container) {
-        bubble.container.setPosition(bubble.targetSprite.x, bubble.targetSprite.y - 36);
+        bubble.container.setPosition(bubble.targetSprite.x, bubble.targetSprite.y - 36 * this.tileScale);
         bubble.container.setDepth(bubble.targetSprite.depth + 50);
       }
     });
 
-    // Follow target sprites for active emoji reaction bubbles
     this.activeReactionBubbles.forEach((bubble) => {
       if (bubble.targetSprite && bubble.container && bubble.container.active) {
         bubble.container.setPosition(bubble.targetSprite.x, bubble.targetSprite.y + bubble.offsetY);
@@ -1206,12 +2249,8 @@ export class OfficeScene extends Phaser.Scene {
       }
     });
 
-    // Update remote players with smooth interpolation
-    if (this.remotePlayerManager) {
-      this.remotePlayerManager.update(time, delta);
-    }
+    if (this.remotePlayerManager) this.remotePlayerManager.update(time, delta);
 
-    // Emit movement intent to multiplayer networking
     if (this.callbacks.onPlayerMoveIntent) {
       this.callbacks.onPlayerMoveIntent({
         x: this.player.x,
@@ -1223,9 +2262,8 @@ export class OfficeScene extends Phaser.Scene {
       });
     }
 
-    // Emit movement to React
-    const currentTileX = Math.floor(this.player.x / TILE_SIZE);
-    const currentTileY = Math.floor(this.player.y / TILE_SIZE);
+    const currentTileX = Math.floor(this.player.x / this.tileSize);
+    const currentTileY = Math.floor(this.player.y / this.tileSize);
     this.callbacks.onPlayerMove({
       x: this.player.x,
       y: this.player.y,
@@ -1234,10 +2272,7 @@ export class OfficeScene extends Phaser.Scene {
       mapId: this.currentMapId,
     });
 
-    // Proximity to interaction zones (5-pixel activation)
     this.checkZoneProximity(this.player.x, this.player.y);
-
-    // Mock colleague autonomous animation
     this.updateMockColleagues(time);
   }
 
@@ -1257,64 +2292,67 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   public handleRemotePlayerStates(
-    states: Array<{
-      userId: string;
-      x: number;
-      y: number;
-      direction: Direction;
-      isMoving: boolean;
-    }>
+    states: Array<{ userId: string; x: number; y: number; direction: Direction; isMoving: boolean }>
   ) {
     if (!this.remotePlayerManager) return;
-    states.forEach((s) =>
-      this.remotePlayerManager.updatePlayerState(s.userId, s.x, s.y, s.direction, s.isMoving)
-    );
+    states.forEach((s) => this.remotePlayerManager.updatePlayerState(s.userId, s.x, s.y, s.direction, s.isMoving));
   }
 
   public handleServerCorrection(correctX: number, correctY: number) {
-    if (this.player) {
-      this.player.setPosition(correctX, correctY);
-    }
+    if (this.player) this.player.setPosition(correctX, correctY);
   }
 
   public updateLocalPlayerProfile(profile: UserProfile) {
     this.playerProfile = profile;
-    if (this.remotePlayerManager) {
-      this.remotePlayerManager.setLocalUserId(profile.id);
-    }
+    if (this.remotePlayerManager) this.remotePlayerManager.setLocalUserId(profile.id);
     this.updatePlayerAvatar(profile.avatarConfig);
   }
 
-  /**
-   * Activates when the player's bounding box is within 5 pixels of the zone rectangle.
-   */
+  public getPlayerPosition(): { x: number; y: number } {
+    return this.player ? { x: this.player.x, y: this.player.y } : { x: 0, y: 0 };
+  }
+
   private checkZoneProximity(playerWorldX: number, playerWorldY: number) {
     if (!this.mapData) return;
 
-    // Player bounding box (offset 7, 20 with size 18, 12 centered around player.x, player.y)
-    // Left: playerWorldX - 9, Right: playerWorldX + 9, Top: playerWorldY + 4, Bottom: playerWorldY + 16
-    const pLeft = playerWorldX - 9;
-    const pRight = playerWorldX + 9;
-    const pTop = playerWorldY + 4;
-    const pBottom = playerWorldY + 16;
+    const halfW = 9 * this.tileScale;
+    const top = 4 * this.tileScale;
+    const bottom = 16 * this.tileScale;
+    const pLeft = playerWorldX - halfW;
+    const pRight = playerWorldX + halfW;
+    const pTop = playerWorldY + top;
+    const pBottom = playerWorldY + bottom;
 
     let closestZone: InteractionZone | null = null;
-    let minDistance = 5.0; // Activated when 5 pixels away
+    let minDistance = 5.0 * this.tileScale;
 
     for (const zone of this.mapData.interactionZones) {
-      const zLeft = zone.tileX * TILE_SIZE;
-      const zRight = (zone.tileX + zone.width) * TILE_SIZE;
-      const zTop = zone.tileY * TILE_SIZE;
-      const zBottom = (zone.tileY + zone.height) * TILE_SIZE;
+      const zLeft = zone.tileX * this.tileSize;
+      const zRight = (zone.tileX + zone.width) * this.tileSize;
+      const zTop = zone.tileY * this.tileSize;
+      const zBottom = (zone.tileY + zone.height) * this.tileSize;
 
-      // Distance from player box to zone box:
       const dx = Math.max(0, Math.max(zLeft - pRight, pLeft - zRight));
       const dy = Math.max(0, Math.max(zTop - pBottom, pTop - zBottom));
       const dist = Math.hypot(dx, dy);
 
-      if (dist <= 5.0 && dist < minDistance) {
+      if (dist <= minDistance && dist < minDistance) {
         minDistance = dist;
         closestZone = zone;
+      }
+    }
+
+    // Zones whose rectangle overlaps the player box also count (distance 0).
+    if (!closestZone) {
+      for (const zone of this.mapData.interactionZones) {
+        const zLeft = zone.tileX * this.tileSize;
+        const zRight = (zone.tileX + zone.width) * this.tileSize;
+        const zTop = zone.tileY * this.tileSize;
+        const zBottom = (zone.tileY + zone.height) * this.tileSize;
+        if (pRight >= zLeft && pLeft <= zRight && pBottom >= zTop && pTop <= zBottom) {
+          closestZone = zone;
+          break;
+        }
       }
     }
 
@@ -1322,16 +2360,13 @@ export class OfficeScene extends Phaser.Scene {
       this.currentNearbyZone = closestZone;
       this.callbacks.onZoneChange(closestZone);
 
-      if (closestZone) {
+      if (closestZone && !this.isStudioMode) {
         this.promptTag.setVisible(true);
-        const targetWorldX = (closestZone.tileX + closestZone.width / 2) * TILE_SIZE;
-        const targetWorldY = closestZone.tileY * TILE_SIZE - 12;
+        const targetWorldX = (closestZone.tileX + closestZone.width / 2) * this.tileSize;
+        const targetWorldY = closestZone.tileY * this.tileSize - 12;
         this.promptTag.setPosition(targetWorldX, targetWorldY);
-
         const textObj = this.promptTag.list[1] as Phaser.GameObjects.Text;
-        if (textObj) {
-          textObj.setText(closestZone.prompt || 'Press [E] Interact');
-        }
+        if (textObj) textObj.setText(closestZone.prompt || 'Press [E] Interact');
       } else {
         this.promptTag.setVisible(false);
       }

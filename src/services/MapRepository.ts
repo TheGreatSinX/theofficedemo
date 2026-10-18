@@ -1,17 +1,58 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Map repository abstraction. All repositories normalize documents through
+ * the schema-v2 migration and re-derive legacy grid fields on save.
  */
 
 import { OfficeMapData } from '../types/game';
-import { OFFICE_MAPS } from '../game/maps/officeMaps';
+import { OFFICE_MAP_IDS, hasFactoryMap, getFactoryMap } from '../game/maps/officeMaps';
+import { migrateMapData, serializeMapForStorage, validateMapData } from '../game/maps/mapSchema';
+
+export interface MapSummary {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  tileSize: number;
+  status?: 'draft' | 'published';
+  updatedAt?: number;
+  isFactory: boolean;
+  objectCount?: number;
+}
+
+export interface SaveMapResult {
+  persistedToCloud: boolean;
+}
 
 export interface IMapRepository {
   getMap(mapId: string): Promise<OfficeMapData>;
-  saveMap(map: OfficeMapData): Promise<void>;
+  listMaps(): Promise<MapSummary[]>;
+  saveMap(map: OfficeMapData): Promise<SaveMapResult>;
   resetMap(mapId: string): Promise<OfficeMapData>;
+  deleteMap(mapId: string): Promise<void>;
   exportMapJson(map: OfficeMapData): string;
   importMapJson(jsonString: string): OfficeMapData;
+}
+
+/** Normalizes any raw document (v1 or v2) into a v2 map object. */
+export function normalizeMapDocument(raw: OfficeMapData): OfficeMapData {
+  const { map } = migrateMapData(raw);
+  return map;
+}
+
+export function summarizeMap(map: OfficeMapData, extra?: Partial<MapSummary>): MapSummary {
+  return {
+    id: map.id,
+    name: map.name,
+    width: map.width,
+    height: map.height,
+    tileSize: map.tileSize,
+    isFactory: hasFactoryMap(map.id),
+    objectCount: map.objects?.length ?? 0,
+    ...extra,
+  };
 }
 
 export class LocalStorageMapRepository implements IMapRepository {
@@ -22,37 +63,57 @@ export class LocalStorageMapRepository implements IMapRepository {
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as OfficeMapData;
-        if (this.validateMapData(parsed)) {
-          return parsed;
-        }
+        const normalized = normalizeMapDocument(parsed);
+        if (validateMapData(normalized).valid) return normalized;
       } catch (err) {
         console.warn(`Failed to parse saved map "${mapId}" from localStorage. Falling back to default.`, err);
       }
     }
-
-    const factory = OFFICE_MAPS[mapId] || OFFICE_MAPS['main_office'];
-    return factory();
+    return getFactoryMap(mapId);
   }
 
-  async saveMap(map: OfficeMapData): Promise<void> {
-    if (!this.validateMapData(map)) {
-      throw new Error('Invalid map structure. Cannot save to storage.');
+  async listMaps(): Promise<MapSummary[]> {
+    const summaries = new Map<string, MapSummary>();
+    for (const id of OFFICE_MAP_IDS) {
+      summaries.set(id, summarizeMap(getFactoryMap(id)));
     }
-    const versionedMap: OfficeMapData = {
-      ...map,
-      version: (map.version || 1) + 1,
-    };
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(this.storagePrefix)) continue;
+      const mapId = key.slice(this.storagePrefix.length);
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key) || '') as OfficeMapData;
+        const normalized = normalizeMapDocument(parsed);
+        summaries.set(mapId, summarizeMap(normalized));
+      } catch {
+        // ignore corrupt entries
+      }
+    }
+    return Array.from(summaries.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async saveMap(map: OfficeMapData): Promise<SaveMapResult> {
+    const serialized = serializeMapForStorage(map);
+    const result = validateMapData(serialized);
+    if (!result.valid) {
+      throw new Error(`Invalid map structure. Cannot save: ${result.errors.join(' ')}`);
+    }
+    const versionedMap: OfficeMapData = { ...serialized, version: (map.version || 1) + 1 };
     localStorage.setItem(`${this.storagePrefix}${map.id}`, JSON.stringify(versionedMap));
+    return { persistedToCloud: false };
   }
 
   async resetMap(mapId: string): Promise<OfficeMapData> {
     localStorage.removeItem(`${this.storagePrefix}${mapId}`);
-    const factory = OFFICE_MAPS[mapId] || OFFICE_MAPS['main_office'];
-    return factory();
+    return getFactoryMap(mapId);
+  }
+
+  async deleteMap(mapId: string): Promise<void> {
+    localStorage.removeItem(`${this.storagePrefix}${mapId}`);
   }
 
   exportMapJson(map: OfficeMapData): string {
-    return JSON.stringify(map, null, 2);
+    return JSON.stringify(serializeMapForStorage(map), null, 2);
   }
 
   importMapJson(jsonString: string): OfficeMapData {
@@ -62,21 +123,12 @@ export class LocalStorageMapRepository implements IMapRepository {
     } catch {
       throw new Error('Malformed JSON string. Please verify the map file format.');
     }
-
-    if (!this.validateMapData(parsed as OfficeMapData)) {
-      throw new Error('JSON is missing mandatory map fields (id, dimensions, floorTiles, solidMask).');
+    const normalized = normalizeMapDocument(parsed as OfficeMapData);
+    const result = validateMapData(normalized);
+    if (!result.valid) {
+      throw new Error(`Imported map is invalid: ${result.errors.join(' ')}`);
     }
-
-    return parsed as OfficeMapData;
-  }
-
-  private validateMapData(data: OfficeMapData): boolean {
-    if (!data || typeof data !== 'object') return false;
-    if (typeof data.id !== 'string' || typeof data.name !== 'string') return false;
-    if (typeof data.width !== 'number' || typeof data.height !== 'number') return false;
-    if (!Array.isArray(data.floorTiles) || !Array.isArray(data.solidMask)) return false;
-    if (data.floorTiles.length !== data.height) return false;
-    return true;
+    return normalized;
   }
 }
 

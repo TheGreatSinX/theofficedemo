@@ -1,19 +1,30 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * React wrapper around the Phaser OfficeScene. The Phaser game instance is
+ * created exactly once and never re-created on React re-renders; all runtime
+ * synchronization flows through the imperative handle and prop effects.
  */
 
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import Phaser from 'phaser';
-import { OfficeScene, SceneCallbacks } from '../game/OfficeScene';
+import {
+  OfficeScene,
+  SceneCallbacks,
+  StudioEditorSettings,
+  StudioSelection,
+  WeatherEffectFlags,
+  WeatherVisualState,
+} from '../game/OfficeScene';
 import {
   UserProfile,
   InteractionZone,
   AvatarConfig,
   OfficeMapData,
-  EditorSettings,
   Direction,
 } from '../types/game';
+import { EditCommand } from '../game/edits';
 import { PlayerNetState } from '../multiplayer/protocol';
 
 interface OfficeCanvasProps {
@@ -32,12 +43,17 @@ interface OfficeCanvasProps {
   }) => void;
   onMapChange: (mapId: string, mapName: string) => void;
   onInteract: (zone: InteractionZone) => void;
-  onMapModified?: (newMapData: OfficeMapData) => void;
+  onEditTransaction?: (commands: EditCommand[]) => void;
+  onSelectionChange?: (selection: StudioSelection) => void;
+  onCursorMove?: (tileX: number, tileY: number, inside: boolean) => void;
+  onZoomChange?: (zoom: number) => void;
   avatarConfig: AvatarConfig;
   speedBoostActive: boolean;
   isControlsEnabled: boolean;
-  isEditorMode: boolean;
-  editorSettings: EditorSettings;
+  isStudioMode: boolean;
+  studioSettings: StudioEditorSettings;
+  weatherState?: WeatherVisualState | null;
+  weatherFlags?: Partial<WeatherEffectFlags>;
 }
 
 export interface OfficeCanvasHandle {
@@ -60,6 +76,10 @@ export interface OfficeCanvasHandle {
   ) => void;
   handleServerCorrection: (correctX: number, correctY: number) => void;
   updateLocalPlayerProfile: (profile: UserProfile) => void;
+  applyExternalCommands: (commands: EditCommand[]) => void;
+  refreshFromCommands: (commands: EditCommand[]) => void;
+  recenterCamera: () => void;
+  getPlayerPosition: () => { x: number; y: number };
 }
 
 export const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(
@@ -73,18 +93,61 @@ export const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(
       onPlayerMoveIntent,
       onMapChange,
       onInteract,
-      onMapModified,
+      onEditTransaction,
+      onSelectionChange,
+      onCursorMove,
+      onZoomChange,
       avatarConfig,
       speedBoostActive,
       isControlsEnabled,
-      isEditorMode,
-      editorSettings,
+      isStudioMode,
+      studioSettings,
+      weatherState,
+      weatherFlags,
     },
     ref
   ) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const gameRef = useRef<Phaser.Game | null>(null);
     const sceneRef = useRef<OfficeScene | null>(null);
+    const isSceneReadyRef = useRef(false);
+
+    // Keep the latest callbacks/props available to the scene-ready handler
+    // without recreating the Phaser game.
+    const latestRef = useRef({
+      onZoneChange,
+      onPlayerMove,
+      onPlayerMoveIntent,
+      onMapChange,
+      onInteract,
+      onEditTransaction,
+      onSelectionChange,
+      onCursorMove,
+      onZoomChange,
+      isControlsEnabled,
+      speedBoostActive,
+      isStudioMode,
+      studioSettings,
+      weatherState,
+      weatherFlags,
+    });
+    latestRef.current = {
+      onZoneChange,
+      onPlayerMove,
+      onPlayerMoveIntent,
+      onMapChange,
+      onInteract,
+      onEditTransaction,
+      onSelectionChange,
+      onCursorMove,
+      onZoomChange,
+      isControlsEnabled,
+      speedBoostActive,
+      isStudioMode,
+      studioSettings,
+      weatherState,
+      weatherFlags,
+    };
 
     useImperativeHandle(ref, () => ({
       loadMapData: (data, spawnX, spawnY) => {
@@ -120,26 +183,43 @@ export const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(
       updateLocalPlayerProfile: (profile) => {
         sceneRef.current?.updateLocalPlayerProfile(profile);
       },
+      applyExternalCommands: (commands) => {
+        sceneRef.current?.applyExternalCommands(commands);
+      },
+      refreshFromCommands: (commands) => {
+        sceneRef.current?.refreshFromCommands(commands);
+      },
+      recenterCamera: () => {
+        sceneRef.current?.recenterCamera();
+      },
+      getPlayerPosition: () => sceneRef.current?.getPlayerPosition() ?? { x: 0, y: 0 },
     }));
-
-    const isSceneReadyRef = useRef(false);
 
     useEffect(() => {
       if (!containerRef.current) return;
 
       const callbacks: SceneCallbacks = {
-        onZoneChange,
-        onPlayerMove,
-        onPlayerMoveIntent,
-        onMapChange,
-        onInteract,
-        onMapModified,
+        onZoneChange: (zone) => latestRef.current.onZoneChange(zone),
+        onPlayerMove: (pos) => latestRef.current.onPlayerMove(pos),
+        onPlayerMoveIntent: (intent) => latestRef.current.onPlayerMoveIntent?.(intent),
+        onMapChange: (mapId, name) => latestRef.current.onMapChange(mapId, name),
+        onInteract: (zone) => latestRef.current.onInteract(zone),
+        onEditTransaction: (commands) => latestRef.current.onEditTransaction?.(commands),
+        onSelectionChange: (selection) => latestRef.current.onSelectionChange?.(selection),
+        onCursorMove: (x, y, inside) => latestRef.current.onCursorMove?.(x, y, inside),
+        onZoomChange: (zoom) => latestRef.current.onZoomChange?.(zoom),
         onSceneReady: () => {
           isSceneReadyRef.current = true;
           if (sceneRef.current) {
-            sceneRef.current.setControlsEnabled(isControlsEnabled);
-            sceneRef.current.setSpeedBoost(speedBoostActive);
-            sceneRef.current.setEditorMode(isEditorMode, editorSettings);
+            sceneRef.current.setControlsEnabled(
+              latestRef.current.isControlsEnabled && !latestRef.current.isStudioMode
+            );
+            sceneRef.current.setSpeedBoost(latestRef.current.speedBoostActive);
+            sceneRef.current.setStudioMode(latestRef.current.isStudioMode, latestRef.current.studioSettings);
+            sceneRef.current.setWeather(
+              latestRef.current.weatherState ?? null,
+              latestRef.current.weatherFlags
+            );
           }
         },
       };
@@ -177,47 +257,50 @@ export const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(
         gameRef.current = null;
         sceneRef.current = null;
       };
+      // The game instance intentionally lives for the component's lifetime.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Sync avatar updates
     useEffect(() => {
       if (sceneRef.current && isSceneReadyRef.current) {
         sceneRef.current.updatePlayerAvatar(avatarConfig);
       }
     }, [avatarConfig]);
 
-    // Sync player profile (including name or ID changes)
     useEffect(() => {
       if (sceneRef.current && isSceneReadyRef.current) {
         sceneRef.current.updateLocalPlayerProfile(playerProfile);
       }
     }, [playerProfile]);
 
-    // Sync speed boost
     useEffect(() => {
       if (sceneRef.current && isSceneReadyRef.current) {
         sceneRef.current.setSpeedBoost(speedBoostActive);
       }
     }, [speedBoostActive]);
 
-    // Sync controls enabled (e.g. typing in chat/editor)
     useEffect(() => {
       if (sceneRef.current && isSceneReadyRef.current) {
-        sceneRef.current.setControlsEnabled(isControlsEnabled);
+        sceneRef.current.setControlsEnabled(isControlsEnabled && !isStudioMode);
       }
-    }, [isControlsEnabled]);
+    }, [isControlsEnabled, isStudioMode]);
 
-    // Sync editor mode & settings
     useEffect(() => {
       if (sceneRef.current && isSceneReadyRef.current) {
-        sceneRef.current.setEditorMode(isEditorMode, editorSettings);
+        sceneRef.current.setStudioMode(isStudioMode, studioSettings);
       }
-    }, [isEditorMode, editorSettings]);
+    }, [isStudioMode, studioSettings]);
+
+    useEffect(() => {
+      if (sceneRef.current && isSceneReadyRef.current) {
+        sceneRef.current.setWeather(weatherState ?? null, weatherFlags);
+      }
+    }, [weatherState, weatherFlags]);
 
     return (
       <div
         ref={containerRef}
-        className="relative w-full h-full overflow-hidden select-none cursor-crosshair bg-slate-950"
+        className="relative w-full h-full overflow-hidden select-none bg-slate-950"
         style={{ imageRendering: 'pixelated' }}
       />
     );

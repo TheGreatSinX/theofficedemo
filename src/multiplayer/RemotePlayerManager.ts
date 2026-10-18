@@ -27,22 +27,42 @@ export class RemotePlayerManager {
   private remotePlayers: Map<string, RemotePlayerEntity> = new Map();
   private registerSpritesheetFn: (key: string, config: AvatarConfig) => void;
   private staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup;
+  /** Uniform scale applied to avatar sprites (tileSize / 32). */
+  private tileScale: number = 1;
 
   // Snap threshold: if remote player jumps more than 120px, snap instead of lerping
   public static readonly SNAP_DISTANCE_THRESHOLD = 120;
   // Interpolation smoothing factor (0.15 - 0.25 gives very smooth 60fps motion for 20Hz ticks)
   public static readonly LERP_FACTOR = 0.22;
+  /** Base depth band for Y-sorted entities (keeps sprites above tile layers). */
+  public static readonly ENTITY_DEPTH_BASE = 2000;
 
   constructor(
     scene: Phaser.Scene,
     localUserId: string,
     registerSpritesheetFn: (key: string, config: AvatarConfig) => void,
-    staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup
+    staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup,
+    tileScale: number = 1
   ) {
     this.scene = scene;
     this.localUserId = localUserId;
     this.registerSpritesheetFn = registerSpritesheetFn;
     this.staticWallsGroup = staticWallsGroup;
+    this.tileScale = tileScale;
+  }
+
+  /** Updates the avatar scale (called when the active map's tile size changes). */
+  public setTileScale(scale: number): void {
+    this.tileScale = scale;
+    for (const entity of this.remotePlayers.values()) {
+      this.applySpriteMetrics(entity.sprite);
+    }
+  }
+
+  private applySpriteMetrics(sprite: Phaser.Physics.Arcade.Sprite): void {
+    sprite.setScale(this.tileScale);
+    sprite.setSize(18 * this.tileScale, 12 * this.tileScale);
+    sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
   }
 
   public setLocalUserId(id: string) {
@@ -87,9 +107,8 @@ export class RemotePlayerManager {
     this.registerSpritesheetFn(textureKey, playerState.avatarConfig);
 
     const sprite = this.scene.physics.add.sprite(playerState.x, playerState.y, textureKey);
-    sprite.setSize(18, 12);
-    sprite.setOffset(7, 20);
-    sprite.setDepth(16 + Math.floor(playerState.y / 32));
+    this.applySpriteMetrics(sprite);
+    sprite.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + playerState.y + 0.25);
 
     const idleKey = `${textureKey}_idle_${playerState.direction}`;
     if (this.scene.anims.exists(idleKey)) {
@@ -178,7 +197,7 @@ export class RemotePlayerManager {
       }
 
       // Dynamic depth sorting based on Y position
-      sprite.setDepth(16 + Math.floor(sprite.y / 32));
+      sprite.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + sprite.y + 0.25);
 
       // Update animations
       const textureKey = `avatar_remote_${entity.userId}`;

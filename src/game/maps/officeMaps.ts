@@ -4,6 +4,7 @@
  */
 
 import { OfficeMapData } from '../../types/game';
+import { migrateMapData } from './mapSchema';
 
 /**
  * Tile IDs:
@@ -258,6 +259,7 @@ export function createMainOfficeMap(): OfficeMapData {
   return {
     id: 'main_office',
     name: 'Main Open Workspace (Floor 1)',
+    schemaVersion: 1,
     version: 1,
     width,
     height,
@@ -404,6 +406,7 @@ export function createBoardroomMap(): OfficeMapData {
   return {
     id: 'boardroom_wing',
     name: 'Executive Boardroom Wing (Floor 2)',
+    schemaVersion: 1,
     version: 1,
     width,
     height,
@@ -523,6 +526,7 @@ export function createRooftopMap(): OfficeMapData {
   return {
     id: 'rooftop_garden',
     name: 'Rooftop Garden & Cafe (Terrace)',
+    schemaVersion: 1,
     version: 1,
     width,
     height,
@@ -545,3 +549,29 @@ export const OFFICE_MAPS: Record<string, () => OfficeMapData> = {
   boardroom_wing: createBoardroomMap,
   rooftop_garden: createRooftopMap,
 };
+
+/** Factory map ids available as a fallback when storage is empty. */
+export const OFFICE_MAP_IDS = Object.keys(OFFICE_MAPS);
+
+/**
+ * Returns a fresh schema-v2 copy of a factory map (migrated from the legacy
+ * v1 definitions above). Falls back to the main office for unknown ids.
+ */
+export function getFactoryMap(mapId: string): OfficeMapData {
+  const factory = OFFICE_MAPS[mapId] || OFFICE_MAPS['main_office'];
+  const raw = factory();
+  const { map } = migrateMapData(raw);
+  return map;
+}
+
+export function hasFactoryMap(mapId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(OFFICE_MAPS, mapId);
+}
+
+/** Lightweight summaries for pickers and the world manager. */
+export function listFactoryMapSummaries(): Array<{ id: string; name: string }> {
+  return OFFICE_MAP_IDS.map((id) => {
+    const map = OFFICE_MAPS[id]();
+    return { id, name: map.name };
+  });
+}

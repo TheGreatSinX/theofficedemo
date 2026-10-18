@@ -78,11 +78,12 @@ export class MovementAuthority {
       };
     }
 
-    // 2. Map boundary bounds check
-    const minX = 16;
-    const minY = 16;
-    const maxX = mapBounds.width * mapBounds.tileSize - 16;
-    const maxY = mapBounds.height * mapBounds.tileSize - 16;
+    // 2. Map boundary bounds check (margin scales with the map's tile size)
+    const margin = Math.max(4, mapBounds.tileSize / 2);
+    const minX = margin;
+    const minY = margin;
+    const maxX = mapBounds.width * mapBounds.tileSize - margin;
+    const maxY = mapBounds.height * mapBounds.tileSize - margin;
 
     if (targetX < minX || targetX > maxX || targetY < minY || targetY > maxY) {
       const clampedX = Math.max(minX, Math.min(maxX, targetX));

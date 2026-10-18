@@ -82,6 +82,32 @@ service cloud.firestore {
              (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128));
     }
 
+    // Asset Metadata Validation
+    function isValidAssetMetadata(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             data.category is string && data.category.size() <= 32 &&
+             data.fileName is string && data.fileName.size() <= 256 &&
+             data.width is number && data.width > 0 && data.width <= 4096 &&
+             data.height is number && data.height > 0 && data.height <= 4096 &&
+             data.frameWidth is number && data.frameWidth >= 8 &&
+             data.frameHeight is number && data.frameHeight >= 8 &&
+             data.columns is number && data.columns >= 1 && data.columns <= 64 &&
+             data.rows is number && data.rows >= 1 && data.rows <= 64 &&
+             (!('storageBackend' in data) || data.storageBackend in ['indexeddb', 'firebase', 'none']) &&
+             (!('ownerUid' in data) || (data.ownerUid is string && data.ownerUid.size() <= 128)) &&
+             (!('thumbnailDataUrl' in data) || (data.thumbnailDataUrl is string && data.thumbnailDataUrl.size() <= 500000));
+    }
+
+    // World Validation
+    function isValidWorld(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             data.schemaVersion is number &&
+             data.version is number &&
+             data.maps is list && data.maps.size() <= 200;
+    }
+
     // 1. Users Collection
     match /users/{userId} {
       allow read: if isSignedIn() && isValidId(userId);
@@ -140,6 +166,37 @@ service cloud.firestore {
       );
 
       allow delete: if isAdmin() && isValidId(configId);
+    }
+
+    // 5. Asset Library Metadata
+    // Binary images live in IndexedDB on-device (and Firebase Storage when
+    // configured); this collection stores only metadata + thumbnails.
+    match /assets/{assetId} {
+      allow get: if isSignedIn() && isValidId(assetId);
+      allow list: if isSignedIn();
+
+      // Any signed-in user can register an asset they imported.
+      allow create: if isSignedIn() && isValidId(assetId) &&
+                       isValidAssetMetadata(incoming()) &&
+                       incoming().ownerUid == request.auth.uid;
+
+      // Creator or admin can update metadata; the owner cannot be reassigned.
+      allow update: if isSignedIn() && isValidId(assetId) &&
+                       isValidAssetMetadata(incoming()) &&
+                       (isAdmin() || existing().ownerUid == request.auth.uid) &&
+                       (isAdmin() || incoming().ownerUid == existing().ownerUid);
+
+      allow delete: if isSignedIn() && isValidId(assetId) &&
+                       (isAdmin() || existing().ownerUid == request.auth.uid);
+    }
+
+    // 6. Worlds (groupings of maps)
+    match /worlds/{worldId} {
+      allow get: if isSignedIn() && isValidId(worldId);
+      allow list: if isSignedIn();
+
+      allow create, update: if isAdmin() && isValidId(worldId) && isValidWorld(incoming());
+      allow delete: if isAdmin() && isValidId(worldId);
     }
   }
 }

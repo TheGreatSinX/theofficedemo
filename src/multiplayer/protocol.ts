@@ -5,9 +5,11 @@
 
 import { Direction, AvatarConfig } from '../types/game';
 
-export const PROTOCOL_VERSION = '1.0.0';
+export const PROTOCOL_VERSION = '1.1.0';
 export const DEFAULT_TICK_RATE = 20; // 20 updates per second (50ms interval)
-export const MAX_MESSAGE_SIZE_BYTES = 16 * 1024; // 16 KB
+// 48 KB: register_map carries a compact transport-encoded collision mask
+// (bounded to ~30k chars by validation) in addition to the regular messages.
+export const MAX_MESSAGE_SIZE_BYTES = 48 * 1024;
 export const MAX_PLAYERS_PER_ROOM = 50;
 
 /**
@@ -19,7 +21,8 @@ export type ClientMessageType =
   | 'heartbeat'
   | 'leave_room'
   | 'request_resync'
-  | 'reaction';
+  | 'reaction'
+  | 'register_map';
 
 /**
  * Server -> Client message types
@@ -34,7 +37,9 @@ export type ServerMessageType =
   | 'server_error'
   | 'room_resync'
   | 'pong'
-  | 'player_reaction';
+  | 'player_reaction'
+  | 'map_registered'
+  | 'map_mismatch';
 
 export interface PlayerNetState {
   userId: string;
@@ -94,13 +99,39 @@ export interface ClientReactionMessage {
   timestamp?: number;
 }
 
+/**
+ * Sent by a client after joining a room to inform the server about the actual
+ * dimensions / tile size / collision mask of the map the room is running. This
+ * lets the server validate movement against dynamic (edited) maps instead of
+ * the hardcoded factory fallback.
+ */
+export interface ClientRegisterMapMessage {
+  type: 'register_map';
+  roomId: string;
+  mapId: string;
+  width: number;
+  height: number;
+  tileSize: number;
+  /** FNV-1a hash of the collision mask (see computeMaskHash). */
+  maskHash: string;
+  /**
+   * Transport-encoded, bit-packed collision mask (see encodeMaskForTransport):
+   * either `rle:<base64>` (byte run-length) or `raw:<base64>` (plain packed).
+   */
+  maskRle: string;
+  /** Spawn tile of the registering client (used to validate joins). */
+  spawnTileX?: number;
+  spawnTileY?: number;
+}
+
 export type ClientMessage =
   | ClientJoinRoomMessage
   | ClientMoveIntentMessage
   | ClientHeartbeatMessage
   | ClientLeaveRoomMessage
   | ClientResyncMessage
-  | ClientReactionMessage;
+  | ClientReactionMessage
+  | ClientRegisterMapMessage;
 
 // Server Messages
 export interface ServerWelcomeMessage {
@@ -174,6 +205,35 @@ export interface ServerPlayerReactionMessage {
   timestamp: number;
 }
 
+export interface ServerMapRegisteredMessage {
+  type: 'map_registered';
+  roomId: string;
+  mapId: string;
+  width: number;
+  height: number;
+  tileSize: number;
+  maskHash: string;
+  /** True when this client's registration defined the authoritative room map. */
+  canonical: boolean;
+  /** Validated initial position for the requesting client (pixels). */
+  spawnX: number;
+  spawnY: number;
+}
+
+export interface ServerMapMismatchMessage {
+  type: 'map_mismatch';
+  roomId: string;
+  /** The canonical room map the server validates against. */
+  mapId: string;
+  width: number;
+  height: number;
+  tileSize: number;
+  maskHash: string;
+  /** RLE collision mask of the canonical room map. */
+  maskRle: string;
+  message: string;
+}
+
 export type ServerMessage =
   | ServerWelcomeMessage
   | ServerRoomSnapshotMessage
@@ -183,7 +243,9 @@ export type ServerMessage =
   | ServerMovementRejectedMessage
   | ServerErrorMessage
   | ServerPongMessage
-  | ServerPlayerReactionMessage;
+  | ServerPlayerReactionMessage
+  | ServerMapRegisteredMessage
+  | ServerMapMismatchMessage;
 
 /**
  * Message Validation Helper
@@ -251,6 +313,46 @@ export function validateClientMessage(raw: unknown): { valid: boolean; error?: s
         return { valid: false, error: 'Invalid emoji in reaction' };
       }
       return { valid: true, message: raw as ClientReactionMessage };
+    }
+    case 'register_map': {
+      if (typeof obj.roomId !== 'string' || obj.roomId.length > 64) {
+        return { valid: false, error: 'Invalid roomId in register_map' };
+      }
+      if (typeof obj.mapId !== 'string' || obj.mapId.length === 0 || obj.mapId.length > 128) {
+        return { valid: false, error: 'Invalid mapId in register_map' };
+      }
+      const width = obj.width;
+      const height = obj.height;
+      const tileSize = obj.tileSize;
+      if (
+        typeof width !== 'number' ||
+        typeof height !== 'number' ||
+        typeof tileSize !== 'number' ||
+        !Number.isInteger(width) ||
+        !Number.isInteger(height) ||
+        !Number.isInteger(tileSize) ||
+        width < 1 ||
+        height < 1 ||
+        width > 400 ||
+        height > 400 ||
+        tileSize < 8 ||
+        tileSize > 128
+      ) {
+        return { valid: false, error: 'Invalid map dimensions in register_map' };
+      }
+      if (typeof obj.maskHash !== 'string' || obj.maskHash.length === 0 || obj.maskHash.length > 16) {
+        return { valid: false, error: 'Invalid maskHash in register_map' };
+      }
+      if (typeof obj.maskRle !== 'string' || obj.maskRle.length === 0 || obj.maskRle.length > 30050) {
+        return { valid: false, error: 'Invalid maskRle in register_map' };
+      }
+      if (obj.spawnTileX !== undefined && (typeof obj.spawnTileX !== 'number' || !Number.isFinite(obj.spawnTileX))) {
+        return { valid: false, error: 'Invalid spawnTileX in register_map' };
+      }
+      if (obj.spawnTileY !== undefined && (typeof obj.spawnTileY !== 'number' || !Number.isFinite(obj.spawnTileY))) {
+        return { valid: false, error: 'Invalid spawnTileY in register_map' };
+      }
+      return { valid: true, message: raw as ClientRegisterMapMessage };
     }
     default:
       return { valid: false, error: `Unknown message type: ${String(obj.type)}` };

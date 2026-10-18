@@ -5,7 +5,10 @@
 
 import {
   ClientMessage,
+  ClientRegisterMapMessage,
   ServerMessage,
+  ServerMapRegisteredMessage,
+  ServerMapMismatchMessage,
   PlayerNetState,
   PROTOCOL_VERSION,
   DEFAULT_TICK_RATE,
@@ -77,6 +80,11 @@ export class MultiplayerClient {
     (correction: { correctX: number; correctY: number; seq: number; reason: string }) => void
   > = [];
   private reactionListeners: Array<(reaction: { userId: string; emoji: string }) => void> = [];
+  private mapRegisteredListeners: Array<(info: ServerMapRegisteredMessage) => void> = [];
+  private mapMismatchListeners: Array<(info: ServerMapMismatchMessage) => void> = [];
+
+  /** Map registration payload sent after joining so the server validates against this map. */
+  private mapRegistration: ClientRegisterMapMessage | null = null;
 
   constructor(transport?: IMultiplayerTransport) {
     this.transport = transport || new WebSocketTransport();
@@ -107,6 +115,12 @@ export class MultiplayerClient {
         version: PROTOCOL_VERSION,
         roomId: this.currentRoomId,
       });
+
+      // Follow up with the map declaration so server-side movement validation
+      // uses this map's actual dimensions and collision mask.
+      if (this.mapRegistration) {
+        this.transport.send({ ...this.mapRegistration, roomId: this.currentRoomId });
+      }
     });
 
     this.transport.onMessage((msg: ServerMessage) => {
@@ -254,10 +268,38 @@ export class MultiplayerClient {
     }
 
     this.currentRoomId = newRoomId;
+    // The map for the new room has not been declared yet.
+    this.mapRegistration = null;
 
     if (this.userProfile) {
       this.connect(this.userProfile, newRoomId, this.idToken || undefined);
     }
+  }
+
+  /**
+   * Declares the map this client is running so the server can validate
+   * movement against it. Safe to call before or after connecting; the payload
+   * is cached and (re)sent whenever the socket opens.
+   */
+  public setMapRegistration(
+    payload: Omit<ClientRegisterMapMessage, 'type' | 'roomId'> | null
+  ): void {
+    if (!payload) {
+      this.mapRegistration = null;
+      return;
+    }
+    this.mapRegistration = {
+      type: 'register_map',
+      roomId: this.currentRoomId,
+      ...payload,
+    };
+    if (this.transport.isOpen()) {
+      this.transport.send({ ...this.mapRegistration, roomId: this.currentRoomId });
+    }
+  }
+
+  public getMapRegistration(): ClientRegisterMapMessage | null {
+    return this.mapRegistration;
   }
 
   /**
@@ -338,6 +380,16 @@ export class MultiplayerClient {
         break;
       case 'player_reaction':
         this.reactionListeners.forEach((cb) => cb({ userId: msg.userId, emoji: msg.emoji }));
+        break;
+      case 'map_registered':
+        this.mapRegisteredListeners.forEach((cb) => cb(msg));
+        break;
+      case 'map_mismatch':
+        console.warn(
+          `[Multiplayer] Room is running map "${msg.mapId}" (${msg.width}x${msg.height}, hash ${msg.maskHash}):`,
+          msg.message
+        );
+        this.mapMismatchListeners.forEach((cb) => cb(msg));
         break;
     }
   }
@@ -465,6 +517,20 @@ export class MultiplayerClient {
     this.reactionListeners.push(callback);
     return () => {
       this.reactionListeners = this.reactionListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onMapRegistered(callback: (info: ServerMapRegisteredMessage) => void): () => void {
+    this.mapRegisteredListeners.push(callback);
+    return () => {
+      this.mapRegisteredListeners = this.mapRegisteredListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onMapMismatch(callback: (info: ServerMapMismatchMessage) => void): () => void {
+    this.mapMismatchListeners.push(callback);
+    return () => {
+      this.mapMismatchListeners = this.mapMismatchListeners.filter((cb) => cb !== callback);
     };
   }
 }

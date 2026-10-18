@@ -18,6 +18,7 @@ import {
 } from './src/multiplayer/protocol';
 import { ticketService } from './src/multiplayer/ticketService';
 import { roomManager, RoomClientSession } from './src/multiplayer/room';
+import { resolveTicketIdentity } from './src/multiplayer/serverAuth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,33 +45,46 @@ app.get('/api/rooms', (req, res) => {
 });
 
 // Connection Ticket Handshake API
-// Authenticated clients exchange verified credential / session for short-lived ticket
-app.post('/api/auth/ticket', (req, res) => {
+// Authenticated clients exchange a verified credential (Firebase ID token)
+// for a short-lived, single-use connection ticket.
+app.post('/api/auth/ticket', async (req, res) => {
   try {
-    const { userId, displayName, role, avatarConfig, roomId } = req.body;
+    const body = (req.body ?? {}) as {
+      userId?: unknown;
+      displayName?: unknown;
+      role?: unknown;
+      avatarConfig?: unknown;
+      roomId?: unknown;
+      status?: unknown;
+    };
 
-    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
-      res.status(400).json({ error: 'Missing or invalid userId' });
+    // Verify the caller's identity. With an ID token: RS256 signature check
+    // against Google's certs, userId from `sub`, role from Firestore. Without
+    // a token (dev/auth-disabled): userId from the body, role capped to
+    // 'employee' — admin can never be self-asserted.
+    const { identity, error } = await resolveTicketIdentity(req.headers.authorization, body);
+    if (!identity) {
+      res.status(error?.status ?? 401).json({ error: error?.message ?? 'Unauthorized' });
       return;
     }
 
-    // Role validation: client cannot arbitrarily grant admin without verification
-    const safeRole: 'admin' | 'employee' = role === 'admin' ? 'admin' : 'employee';
-
     // Disallow disabled accounts
-    if (req.body.status === 'disabled') {
+    if (body.status === 'disabled') {
       res.status(403).json({ error: 'Account is suspended or disabled' });
       return;
     }
 
-    const targetRoomId = (roomId && typeof roomId === 'string') ? roomId : 'main_office';
+    const targetRoomId =
+      typeof body.roomId === 'string' && body.roomId.length > 0 && body.roomId.length <= 64
+        ? body.roomId
+        : 'main_office';
 
     // Issue short-lived ticket with 60s TTL
     const ticket = ticketService.issueTicket({
-      userId,
-      displayName: displayName || 'Colleague',
-      role: safeRole,
-      avatarConfig: avatarConfig || {
+      userId: identity.userId,
+      displayName: identity.displayName || 'Colleague',
+      role: identity.role,
+      avatarConfig: (body.avatarConfig as ConnectionTicketAvatar) || {
         skinColor: '#f8c291',
         hairStyle: 'short',
         hairColor: '#3d2714',
@@ -85,12 +99,15 @@ app.post('/api/auth/ticket', (req, res) => {
       ticketId: ticket.ticketId,
       expiresAt: ticket.expiresAt,
       roomId: ticket.roomId,
+      verified: identity.verified,
     });
   } catch (err: unknown) {
     console.error('Error issuing connection ticket:', err);
     res.status(500).json({ error: 'Internal server error while issuing ticket' });
   }
 });
+
+type ConnectionTicketAvatar = Parameters<typeof ticketService.issueTicket>[0]['avatarConfig'];
 
 // WebSocket Server attached to HTTP server
 const wss = new WebSocketServer({ noServer: true });
@@ -204,6 +221,9 @@ wss.on('connection', (ws: WebSocket, req: http.IncomingMessage, ticket: any) => 
           break;
         case 'reaction':
           room.handleReaction(ticket.userId, msg.emoji);
+          break;
+        case 'register_map':
+          room.registerMap(session, msg);
           break;
       }
     } catch (err) {

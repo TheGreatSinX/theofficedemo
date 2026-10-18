@@ -1,11 +1,16 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Mini-map: renders a compact top-down preview of the active map. Reads the
+ * schema-v2 layer data (with legacy `floorTiles`/`solidMask` fallback) so it
+ * stays correct for both migrated factory maps and edited maps.
  */
 
 import React, { useRef, useEffect } from 'react';
 import { OfficeMapData, UserProfile } from '../types/game';
 import { Map, Maximize2, Minimize2 } from 'lucide-react';
+import { getCollisionMask, getTileLayers } from '../game/maps/mapSchema';
 
 interface MiniMapProps {
   mapData: OfficeMapData;
@@ -15,6 +20,23 @@ interface MiniMapProps {
   isOpen: boolean;
   onToggle: () => void;
 }
+
+/** Builtin tile id -> minimap color. */
+const TILE_COLORS: Record<number, string> = {
+  0: '#3a2e22', // wood floor
+  1: '#1e293b', // blue carpet
+  2: '#334155', // gray stone
+  3: '#3f3f46', // checkered break room
+  4: '#4b3f2f', // outdoor deck
+  5: '#14532d', // grass
+  10: '#475569', // wall top
+  11: '#64748b', // wall face
+  12: '#0e7490', // window
+  13: '#312e81', // glass partition
+};
+
+const ASSET_TILE_COLOR = '#4c1d95';
+const EMPTY_TILE_COLOR = '#0b1120';
 
 export const MiniMap: React.FC<MiniMapProps> = ({
   mapData,
@@ -35,53 +57,76 @@ export const MiniMap: React.FC<MiniMapProps> = ({
     const scale = 6; // pixels per tile on minimap
     canvas.width = mapData.width * scale;
     canvas.height = mapData.height * scale;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Draw floor tiles
+    const tileLayers = getTileLayers(mapData);
+    const groundLayer = tileLayers.find((l) => l.depthMode === 'ground') || tileLayers[0];
+    const rowLayers = tileLayers.filter((l) => l.depthMode === 'row');
+    const legacyFloor = mapData.floorTiles;
+    const collisionMask = getCollisionMask(mapData);
+
+    // 1. Draw ground tiles (active layer data first, legacy fields as fallback)
     for (let y = 0; y < mapData.height; y++) {
       for (let x = 0; x < mapData.width; x++) {
-        const floorId = mapData.floorTiles[y][x];
-        if (floorId === 1) {
-          ctx.fillStyle = '#1e293b'; // carpet
-        } else if (floorId === 3) {
-          ctx.fillStyle = '#334155'; // checkered
-        } else if (floorId === 5) {
-          ctx.fillStyle = '#14532d'; // grass
-        } else {
-          ctx.fillStyle = '#1e1e24'; // wood
+        let tileId: number | undefined = groundLayer?.tiles?.[y]?.[x];
+        if (tileId === undefined) tileId = legacyFloor?.[y]?.[x];
+        let color = EMPTY_TILE_COLOR;
+        if (tileId !== undefined && tileId >= 0) {
+          color = TILE_COLORS[tileId] ?? ASSET_TILE_COLOR;
         }
+        ctx.fillStyle = color;
         ctx.fillRect(x * scale, y * scale, scale, scale);
       }
     }
 
-    // 2. Draw solid walls & objects
-    for (let y = 0; y < mapData.height; y++) {
-      for (let x = 0; x < mapData.width; x++) {
-        if (mapData.solidMask[y][x]) {
-          ctx.fillStyle = '#475569';
+    // 2. Draw wall / foreground layers
+    for (const layer of rowLayers) {
+      if (!layer.tiles || layer.visible === false) continue;
+      for (let y = 0; y < mapData.height; y++) {
+        for (let x = 0; x < mapData.width; x++) {
+          const tileId = layer.tiles[y]?.[x] ?? -1;
+          if (tileId < 0) continue;
+          ctx.fillStyle = TILE_COLORS[tileId] ?? ASSET_TILE_COLOR;
           ctx.fillRect(x * scale, y * scale, scale, scale);
         }
       }
     }
 
-    // 3. Draw interaction zones (colored subtle overlays)
+    // 3. Draw solid collision tiles as a light overlay
+    for (let y = 0; y < mapData.height; y++) {
+      const row = collisionMask[y];
+      if (!row) continue;
+      for (let x = 0; x < mapData.width; x++) {
+        if (!row[x]) continue;
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.4)';
+        ctx.fillRect(x * scale, y * scale, scale, scale);
+      }
+    }
+
+    // 4. Draw interaction zones (colored subtle overlays)
     mapData.interactionZones.forEach((zone) => {
-      ctx.fillStyle = zone.type === 'meeting_room' ? 'rgba(99, 102, 241, 0.45)' : 'rgba(234, 179, 8, 0.35)';
+      ctx.fillStyle =
+        zone.type === 'meeting_room' ? 'rgba(99, 102, 241, 0.45)' : 'rgba(234, 179, 8, 0.35)';
       ctx.fillRect(zone.tileX * scale, zone.tileY * scale, zone.width * scale, zone.height * scale);
     });
 
-    // 4. Draw colleagues blips
+    // 5. Draw colleagues blips
     colleagues
       .filter((u) => u.currentMapId === mapData.id)
       .forEach((colleague) => {
         ctx.fillStyle = colleague.status === 'in_meeting' ? '#a855f7' : '#10b981';
         ctx.beginPath();
-        ctx.arc(colleague.x * scale + scale / 2, colleague.y * scale + scale / 2, scale / 2, 0, Math.PI * 2);
+        ctx.arc(
+          colleague.x * scale + scale / 2,
+          colleague.y * scale + scale / 2,
+          scale / 2,
+          0,
+          Math.PI * 2
+        );
         ctx.fill();
       });
 
-    // 5. Draw Player blip (pulsing white/cyan marker)
+    // 6. Draw Player blip (pulsing white/cyan marker)
     ctx.fillStyle = '#38bdf8';
     ctx.beginPath();
     ctx.arc(playerTileX * scale + scale / 2, playerTileY * scale + scale / 2, scale / 1.5, 0, Math.PI * 2);
@@ -124,7 +169,9 @@ export const MiniMap: React.FC<MiniMapProps> = ({
       </div>
 
       <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-        <span>X: {playerTileX} Y: {playerTileY}</span>
+        <span>
+          X: {playerTileX} Y: {playerTileY}
+        </span>
         <span className="text-cyan-400 font-sans">You: ● Blue</span>
       </div>
     </div>

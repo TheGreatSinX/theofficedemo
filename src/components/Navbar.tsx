@@ -164,10 +164,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ? 'bg-amber-500 text-slate-950 font-bold'
                 : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40'
             }`}
-            title="Open Admin Visual Map Editor"
+            title="Open the map Studio (World/Studio modes)"
           >
             <Wrench className="w-3.5 h-3.5" />
-            <span>{isEditorOpen ? 'Close Editor' : 'Map Editor'}</span>
+            <span>{isEditorOpen ? 'Exit Studio' : 'Studio'}</span>
           </button>
         )}
 

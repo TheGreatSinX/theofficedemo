@@ -7,12 +7,19 @@ import {
   PlayerNetState,
   ServerMessage,
   ClientMoveIntentMessage,
+  ClientRegisterMapMessage,
   DEFAULT_TICK_RATE,
   MAX_PLAYERS_PER_ROOM,
 } from './protocol';
 import { MovementAuthority, AuthoritativeMapBounds } from './authority';
 import { Direction, AvatarConfig } from '../types/game';
-import { OFFICE_MAPS } from '../game/maps/officeMaps';
+import { getFactoryMap, hasFactoryMap } from '../game/maps/officeMaps';
+import {
+  computeMaskHash,
+  decodeMaskFromTransport,
+  encodeMaskForTransport,
+  getCollisionMask,
+} from '../game/maps/mapSchema';
 
 export interface RoomClientSession {
   userId: string;
@@ -37,6 +44,12 @@ export class OfficeRoom {
   private movementAuthority: MovementAuthority;
   private tickInterval: NodeJS.Timeout | null = null;
   private tickRateHz: number;
+  /** Map id the authoritative collision data was declared for. */
+  private mapId: string = '';
+  /** FNV-1a collision mask hash; 'unregistered' until a client declares one. */
+  private mapMaskHash: string = 'unregistered';
+  /** True once a client has declared the authoritative (edited) map. */
+  private hasClientRegistration: boolean = false;
 
   constructor(
     roomId: string,
@@ -47,23 +60,29 @@ export class OfficeRoom {
     this.movementAuthority = movementAuthority;
     this.tickRateHz = tickRateHz;
 
-    // Load authoritative map data if standard map exists
-    const mapFactory = OFFICE_MAPS[roomId];
-    if (mapFactory) {
-      const mapData = mapFactory();
+    // Factory map data seeds the bounds; the first client `register_map` for
+    // this room replaces it with the actual (possibly edited) map so movement
+    // validation always matches what players see.
+    if (hasFactoryMap(roomId)) {
+      const mapData = getFactoryMap(roomId);
+      const mask = getCollisionMask(mapData);
+      this.mapId = mapData.id;
       this.mapBounds = {
         width: mapData.width,
         height: mapData.height,
         tileSize: mapData.tileSize,
-        solidMask: mapData.solidMask,
+        solidMask: mask,
       };
+      this.mapMaskHash = computeMaskHash(mapData.width, mapData.height, mask);
     } else {
-      // Default bounds for dynamic / custom rooms (e.g. 36x24 tiles, 32px each)
+      // Default bounds until a client declares the room's actual map.
+      this.mapId = roomId;
       this.mapBounds = {
         width: 36,
         height: 24,
         tileSize: 32,
       };
+      this.mapMaskHash = 'unregistered';
     }
 
     this.startTickLoop();
@@ -75,6 +94,25 @@ export class OfficeRoom {
 
   public getOccupants(): PlayerNetState[] {
     return Array.from(this.playerStates.values());
+  }
+
+  /** Snapshot of the authoritative map this room validates movement against. */
+  public getMapRegistrationInfo(): {
+    mapId: string;
+    width: number;
+    height: number;
+    tileSize: number;
+    maskHash: string;
+    registered: boolean;
+  } {
+    return {
+      mapId: this.mapId,
+      width: this.mapBounds.width,
+      height: this.mapBounds.height,
+      tileSize: this.mapBounds.tileSize,
+      maskHash: this.mapMaskHash,
+      registered: this.hasClientRegistration,
+    };
   }
 
   public addPlayer(
@@ -99,9 +137,11 @@ export class OfficeRoom {
       this.clients.delete(userId);
     }
 
-    // Determine initial spawn position
-    const initX = spawnX !== undefined ? spawnX : 8 * 32 + 16;
-    const initY = spawnY !== undefined ? spawnY : 11 * 32 + 16;
+    // Determine initial spawn position (validated against the room map)
+    const tileSize = this.mapBounds.tileSize;
+    const requestedX = spawnX !== undefined ? spawnX : 8 * tileSize + tileSize / 2;
+    const requestedY = spawnY !== undefined ? spawnY : 11 * tileSize + tileSize / 2;
+    const safe = this.findOpenPosition(requestedX, requestedY);
 
     const netState: PlayerNetState = {
       userId,
@@ -109,8 +149,8 @@ export class OfficeRoom {
       role,
       avatarConfig,
       roomId: this.roomId,
-      x: initX,
-      y: initY,
+      x: safe.x,
+      y: safe.y,
       direction: 'down',
       isMoving: false,
       seq: 0,
@@ -214,6 +254,187 @@ export class OfficeRoom {
 
     // Broadcast reaction to all other connected players in the room
     this.broadcast(reactionMsg, userId);
+  }
+
+  /**
+   * Handles a client declaring the map the room is running. The first
+   * registration defines the authoritative map (dimensions, tile size and
+   * collision mask) for the room; later registrations are answered with the
+   * canonical data, or a mismatch report when they disagree.
+   */
+  public registerMap(session: RoomClientSession, msg: ClientRegisterMapMessage): void {
+    if (!this.clients.has(session.userId)) return;
+
+    const mask = decodeMaskFromTransport(msg.maskRle, msg.width, msg.height);
+    if (!mask) {
+      this.sendError(session, 'INVALID_MAP_MASK', 'Could not decode the collision mask from register_map.');
+      return;
+    }
+    // Trust our own hash of the decoded mask, not the client-provided one.
+    const decodedHash = computeMaskHash(msg.width, msg.height, mask);
+
+    if (!this.hasClientRegistration) {
+      this.mapId = msg.mapId;
+      this.mapBounds = {
+        width: msg.width,
+        height: msg.height,
+        tileSize: msg.tileSize,
+        solidMask: mask,
+      };
+      this.mapMaskHash = decodedHash;
+      this.hasClientRegistration = true;
+
+      this.revalidatePlayersAgainstMap();
+
+      const safe = this.applyClientSpawn(session.userId, msg);
+      const reply: ServerMessage = {
+        type: 'map_registered',
+        roomId: this.roomId,
+        mapId: this.mapId,
+        width: this.mapBounds.width,
+        height: this.mapBounds.height,
+        tileSize: this.mapBounds.tileSize,
+        maskHash: this.mapMaskHash,
+        canonical: true,
+        spawnX: safe.x,
+        spawnY: safe.y,
+      };
+      // Broadcast so every client in the room knows the authoritative map.
+      this.broadcast(reply);
+      return;
+    }
+
+    const sameAsCanonical =
+      this.mapBounds.width === msg.width &&
+      this.mapBounds.height === msg.height &&
+      this.mapMaskHash === decodedHash;
+
+    if (sameAsCanonical) {
+      const safe = this.applyClientSpawn(session.userId, msg);
+      const reply: ServerMessage = {
+        type: 'map_registered',
+        roomId: this.roomId,
+        mapId: this.mapId,
+        width: this.mapBounds.width,
+        height: this.mapBounds.height,
+        tileSize: this.mapBounds.tileSize,
+        maskHash: this.mapMaskHash,
+        canonical: false,
+        spawnX: safe.x,
+        spawnY: safe.y,
+      };
+      this.sendToSession(session, reply);
+      return;
+    }
+
+    // Mismatch: report the canonical room map so the client can reconcile.
+    const canonicalMask = this.mapBounds.solidMask;
+    const mismatch: ServerMessage = {
+      type: 'map_mismatch',
+      roomId: this.roomId,
+      mapId: this.mapId,
+      width: this.mapBounds.width,
+      height: this.mapBounds.height,
+      tileSize: this.mapBounds.tileSize,
+      maskHash: this.mapMaskHash,
+      maskRle: canonicalMask ? encodeMaskForTransport(canonicalMask) : '',
+      message:
+        'This room is validating movement against a different revision of this map. Ask everyone to save and reload, or reset the room.',
+    };
+    this.sendToSession(session, mismatch);
+  }
+
+  /**
+   * Validates the registering client's spawn tile against the room map and
+   * snaps the authoritative player state to it so the first move_intent is
+   * accepted without a correction round-trip.
+   */
+  private applyClientSpawn(
+    userId: string,
+    msg: ClientRegisterMapMessage
+  ): { x: number; y: number } {
+    const tileSize = this.mapBounds.tileSize;
+    const requestedX =
+      (msg.spawnTileX !== undefined ? msg.spawnTileX : 8) * tileSize + tileSize / 2;
+    const requestedY =
+      (msg.spawnTileY !== undefined ? msg.spawnTileY : 11) * tileSize + tileSize / 2;
+    const safe = this.findOpenPosition(requestedX, requestedY);
+
+    const state = this.playerStates.get(userId);
+    if (state) {
+      state.x = safe.x;
+      state.y = safe.y;
+      state.timestamp = Date.now();
+      this.dirtyPlayerIds.add(userId);
+    }
+    return safe;
+  }
+
+  /**
+   * Clamps a world position into the room bounds and nudges it out of solid
+   * tiles using an expanding ring search.
+   */
+  public findOpenPosition(x: number, y: number): { x: number; y: number } {
+    const { width, height, tileSize, solidMask } = this.mapBounds;
+    const margin = Math.max(4, tileSize / 2);
+    const clampedX = Math.min(Math.max(x, margin), width * tileSize - margin);
+    const clampedY = Math.min(Math.max(y, margin), height * tileSize - margin);
+    if (!solidMask) return { x: clampedX, y: clampedY };
+
+    let tx = Math.min(Math.max(Math.floor(clampedX / tileSize), 0), width - 1);
+    let ty = Math.min(Math.max(Math.floor(clampedY / tileSize), 0), height - 1);
+    if (!solidMask[ty]?.[tx]) return { x: clampedX, y: clampedY };
+
+    const maxRadius = Math.max(width, height);
+    for (let r = 1; r <= maxRadius; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          // Only the ring border (skip interior, covered by smaller radii)
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          const nx = tx + dx;
+          const ny = ty + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          if (!solidMask[ny]?.[nx]) {
+            return { x: nx * tileSize + tileSize / 2, y: ny * tileSize + tileSize / 2 };
+          }
+        }
+      }
+    }
+    return { x: clampedX, y: clampedY };
+  }
+
+  /**
+   * After the authoritative map changes, relocate any player whose position is
+   * now out of bounds or inside a solid tile and notify them of the correction.
+   */
+  private revalidatePlayersAgainstMap(): void {
+    for (const [userId, state] of this.playerStates.entries()) {
+      const safe = this.findOpenPosition(state.x, state.y);
+      if (safe.x !== state.x || safe.y !== state.y) {
+        state.x = safe.x;
+        state.y = safe.y;
+        state.timestamp = Date.now();
+        this.dirtyPlayerIds.add(userId);
+
+        const session = this.clients.get(userId);
+        if (session) {
+          const rejectMsg: ServerMessage = {
+            type: 'movement_rejected',
+            roomId: this.roomId,
+            seq: state.seq,
+            correctX: safe.x,
+            correctY: safe.y,
+            reason: 'Relocated to match the room map revision',
+          };
+          this.sendToSession(session, rejectMsg);
+        }
+      }
+    }
+  }
+
+  private sendError(session: RoomClientSession, code: string, message: string): void {
+    const errMsg: ServerMessage = { type: 'server_error', code, message };
+    this.sendToSession(session, errMsg);
   }
 
   public removePlayer(
