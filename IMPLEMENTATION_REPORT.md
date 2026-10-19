@@ -217,7 +217,9 @@ Key invariants:
 
 - Deploys through Cloudflare Workers Builds (build: `npm run build`, deploy:
   `npx wrangler deploy`) driven by the committed `wrangler.jsonc` (worker
-  name `office`) — no interactive setup, no npm install during deploy.
+  name `office`, live at **`office.landverseauto.workers.dev`**; note that
+  `97ee04f1-office.…workers.dev` is a frozen version-preview URL and does not
+  track deployments) — no interactive setup, no npm install during deploy.
 - **Root cause of the first failed deploy (fixed):** without a committed
   Wrangler config, `wrangler deploy` ran its interactive "Vite framework"
   auto-setup, which shelled out to a plain `npm install` and aborted on this
@@ -257,7 +259,8 @@ Key invariants:
      live anonymous read probe → 403).
   3. Authentication — initialized with **Google** sign-in enabled (the default
      email/password config is untouched; the app only surfaces Google).
-  4. Authorized domains — `97ee04f1-office.landverseauto.workers.dev` added
+  4. Authorized domains — `office.landverseauto.workers.dev` (production)
+     and the older `97ee04f1-office.landverseauto.workers.dev` preview URL,
      alongside `localhost`, `th30ffi3-dem0.firebaseapp.com`, and
      `th30ffi3-dem0.web.app` (verified via the Auth admin API).
 - Multiplayer works without sign-in (unverified `employee` tickets; admin can
