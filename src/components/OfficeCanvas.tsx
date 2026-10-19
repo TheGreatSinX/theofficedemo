@@ -300,7 +300,7 @@ export const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(
     return (
       <div
         ref={containerRef}
-        className="relative w-full h-full overflow-hidden select-none bg-slate-950"
+        className="relative w-full h-full overflow-hidden select-none bg-rpg-ink"
         style={{ imageRendering: 'pixelated' }}
       />
     );

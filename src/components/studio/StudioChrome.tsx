@@ -54,7 +54,7 @@ export interface StudioCommandBarProps {
 }
 
 const barButton =
-  'px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border';
+  'rpg-btn px-2.5 py-1.5 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer';
 
 export const NumberField: React.FC<{
   label: string;
@@ -64,8 +64,8 @@ export const NumberField: React.FC<{
   onChange(value: number): void;
   step?: number;
 }> = ({ label, value, min = -100000, max = 100000, onChange, step = 1 }) => (
-  <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
-    <span className="text-slate-400">{label}</span>
+  <label className="flex items-center gap-1.5 text-[11px] text-rpg-text">
+    <span className="text-rpg-dim">{label}</span>
     <input
       type="number"
       value={Number.isFinite(value) ? value : 0}
@@ -76,7 +76,7 @@ export const NumberField: React.FC<{
         const next = parseFloat(e.target.value);
         if (Number.isFinite(next)) onChange(Math.max(min, Math.min(max, next)));
       }}
-      className="w-16 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+      className="w-16 rpg-input px-1.5 py-0.5 text-xs text-rpg-text"
     />
   </label>
 );
@@ -87,13 +87,13 @@ export const TextField: React.FC<{
   onChange(value: string): void;
   width?: string;
 }> = ({ label, value, onChange, width = 'w-40' }) => (
-  <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
-    <span className="text-slate-400">{label}</span>
+  <label className="flex items-center gap-1.5 text-[11px] text-rpg-text">
+    <span className="text-rpg-dim">{label}</span>
     <input
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`${width} bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-indigo-500`}
+      className={`${width} rpg-input px-1.5 py-0.5 text-xs text-rpg-text`}
     />
   </label>
 );
@@ -104,12 +104,12 @@ export const SelectField: React.FC<{
   options: Array<{ value: string; label: string }>;
   onChange(value: string): void;
 }> = ({ label, value, options, onChange }) => (
-  <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
-    <span className="text-slate-400">{label}</span>
+  <label className="flex items-center gap-1.5 text-[11px] text-rpg-text">
+    <span className="text-rpg-dim">{label}</span>
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+      className="rpg-input px-1.5 py-0.5 text-xs text-rpg-text"
     >
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
@@ -157,29 +157,27 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
   const fileTooLarge = newWidth * newHeight > MAX_MAP_CELLS;
 
   return (
-    <div className="shrink-0 bg-slate-900 border-b border-slate-700/80 px-3 py-2 flex flex-wrap items-center gap-2 z-30">
-      <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px] font-black tracking-wider">
+    <div className="shrink-0 rpg-bar px-3 py-2 flex flex-wrap items-center gap-2 z-30">
+      <span className="rpg-chip rpg-chip-gold px-2 py-0.5">
         STUDIO
       </span>
-      <span className="text-xs font-semibold text-white truncate max-w-[180px]" title={map.name}>
+      <span className="text-xs font-semibold text-rpg-text truncate max-w-[180px]" title={map.name}>
         {map.name}
       </span>
-      <span className="text-[10px] font-mono text-slate-400">
+      <span className="text-[10px] font-mono text-rpg-dim">
         {map.width}×{map.height} · {map.tileSize}px
       </span>
       {isDirty && (
-        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-semibold">
+        <span className="rpg-chip rpg-chip-gold px-1.5 py-0.5">
           UNSAVED
         </span>
       )}
 
-      <div className="w-px h-5 bg-slate-700/80 mx-1" />
+      <div className="w-px h-5 bg-rpg-ink mx-1" />
 
       <button
         className={`${barButton} ${
-          canUndo
-            ? 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200'
-            : 'bg-slate-800/40 border-slate-700/50 text-slate-600 cursor-not-allowed'
+          canUndo ? 'rpg-btn-plain' : 'cursor-not-allowed'
         }`}
         onClick={onUndo}
         disabled={!canUndo}
@@ -189,9 +187,7 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
       </button>
       <button
         className={`${barButton} ${
-          canRedo
-            ? 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200'
-            : 'bg-slate-800/40 border-slate-700/50 text-slate-600 cursor-not-allowed'
+          canRedo ? 'rpg-btn-plain' : 'cursor-not-allowed'
         }`}
         onClick={onRedo}
         disabled={!canRedo}
@@ -200,10 +196,10 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
         <Redo2 className="w-3.5 h-3.5" /> Redo
       </button>
 
-      <div className="w-px h-5 bg-slate-700/80 mx-1" />
+      <div className="w-px h-5 bg-rpg-ink mx-1" />
 
       <button
-        className={`${barButton} bg-emerald-600 hover:bg-emerald-500 border-emerald-500 text-white`}
+        className={`${barButton} rpg-btn-gold`}
         onClick={onSaveDraft}
         disabled={isSaving}
         title="Save draft (Ctrl+S)"
@@ -212,9 +208,7 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
       </button>
       <button
         className={`${barButton} ${
-          isAdmin
-            ? 'bg-indigo-600 hover:bg-indigo-500 border-indigo-500 text-white'
-            : 'bg-slate-800/40 border-slate-700/50 text-slate-600 cursor-not-allowed'
+          isAdmin ? 'rpg-btn-gold' : 'cursor-not-allowed'
         }`}
         onClick={onPublish}
         disabled={!isAdmin || isPublishing}
@@ -223,24 +217,24 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
         <UploadCloud className="w-3.5 h-3.5" /> {isPublishing ? 'Publishing…' : 'Publish'}
       </button>
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={onReloadFromSaved}
         title="Discard unsaved changes and reload the saved version"
       >
         <RotateCcw className="w-3.5 h-3.5" /> Reload
       </button>
 
-      <div className="w-px h-5 bg-slate-700/80 mx-1" />
+      <div className="w-px h-5 bg-rpg-ink mx-1" />
 
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={onExportJson}
         title="Export this map as JSON"
       >
         <Download className="w-3.5 h-3.5" /> Export
       </button>
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={() => fileInputRef.current?.click()}
         title="Import a map JSON file"
       >
@@ -264,7 +258,7 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
       />
 
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={() => {
           setResizeW(map.width);
           setResizeH(map.height);
@@ -275,28 +269,28 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
         <Scaling className="w-3.5 h-3.5" /> Resize
       </button>
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={() => setShowNewMap((v) => !v)}
         title="Create a new map"
       >
         <FilePlus2 className="w-3.5 h-3.5" /> New
       </button>
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={onOpenAssetManager}
         title="Asset manager: import RPG Maker MZ sheets"
       >
         <Image className="w-3.5 h-3.5" /> Assets
       </button>
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={onOpenMapPicker}
         title="Browse all maps"
       >
         <FolderOpen className="w-3.5 h-3.5" /> Maps
       </button>
       <button
-        className={`${barButton} bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200`}
+        className={`${barButton} rpg-btn-plain`}
         onClick={onOpenWorldManager}
         title="World manager: group maps, inspect connections"
       >
@@ -306,7 +300,7 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
       <div className="flex-1" />
 
       <button
-        className={`${barButton} bg-amber-500 hover:bg-amber-400 border-amber-400 text-slate-950 font-semibold`}
+        className={`${barButton} rpg-btn-plain font-semibold`}
         onClick={onExitStudio}
         title="Back to World Mode (Esc)"
       >
@@ -314,12 +308,12 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
       </button>
 
       {showResize && (
-        <div className="w-full flex flex-wrap items-center gap-3 bg-slate-950/70 border border-slate-700/70 rounded-lg px-3 py-2 mt-1">
-          <span className="text-[11px] font-semibold text-slate-300">Resize map</span>
+        <div className="rpg-window w-full flex flex-wrap items-center gap-3 px-3 py-2 mt-1">
+          <span className="rpg-window-title text-[11px] font-semibold text-rpg-title">Resize map</span>
           <NumberField label="W" value={resizeW} min={1} max={MAX_MAP_DIMENSION} onChange={setResizeW} />
           <NumberField label="H" value={resizeH} min={1} max={MAX_MAP_DIMENSION} onChange={setResizeH} />
           <button
-            className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs text-white cursor-pointer"
+            className="rpg-btn rpg-btn-gold px-2.5 py-1 text-xs cursor-pointer"
             onClick={() => {
               onResizeMap(resizeW, resizeH);
               setShowResize(false);
@@ -327,24 +321,24 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
           >
             Apply resize
           </button>
-          <span className="text-[10px] text-slate-400">
+          <span className="text-[10px] text-rpg-dim">
             Shrinking drops content outside the new bounds (undoable).
           </span>
         </div>
       )}
 
       {showNewMap && (
-        <div className="w-full flex flex-wrap items-center gap-3 bg-slate-950/70 border border-slate-700/70 rounded-lg px-3 py-2 mt-1">
-          <span className="text-[11px] font-semibold text-slate-300">New map</span>
+        <div className="rpg-window w-full flex flex-wrap items-center gap-3 px-3 py-2 mt-1">
+          <span className="rpg-window-title text-[11px] font-semibold text-rpg-title">New map</span>
           <TextField label="Name" value={newName} onChange={setNewName} />
           <NumberField label="W" value={newWidth} min={1} max={MAX_MAP_DIMENSION} onChange={setNewWidth} />
           <NumberField label="H" value={newHeight} min={1} max={MAX_MAP_DIMENSION} onChange={setNewHeight} />
-          <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
-            <span className="text-slate-400">Tile</span>
+          <label className="flex items-center gap-1.5 text-[11px] text-rpg-text">
+            <span className="text-rpg-dim">Tile</span>
             <select
               value={newTileSize}
               onChange={(e) => setNewTileSize(parseInt(e.target.value, 10))}
-              className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-white"
+              className="rpg-input px-1.5 py-0.5 text-xs text-rpg-text"
             >
               {SUPPORTED_TILE_SIZES.map((size) => (
                 <option key={size} value={size}>
@@ -354,8 +348,8 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
             </select>
           </label>
           <button
-            className={`px-2.5 py-1 rounded text-xs cursor-pointer ${
-              fileTooLarge ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+            className={`rpg-btn px-2.5 py-1 text-xs cursor-pointer ${
+              fileTooLarge ? 'cursor-not-allowed' : 'rpg-btn-gold'
             }`}
             disabled={fileTooLarge}
             onClick={() => {
@@ -366,7 +360,7 @@ export const StudioCommandBar: React.FC<StudioCommandBarProps> = ({
             Create
           </button>
           {fileTooLarge && (
-            <span className="text-[10px] text-amber-300">Map exceeds the recommended {MAX_MAP_CELLS} cells.</span>
+            <span className="text-[10px] text-rpg-gold">Map exceeds the recommended {MAX_MAP_CELLS} cells.</span>
           )}
         </div>
       )}
@@ -395,7 +389,7 @@ export const StudioStatusBar: React.FC<StudioStatusBarProps> = ({
     ? `${selection.kind}${selection.id ? ` · ${selection.id}` : ''}`
     : 'no selection';
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-30 bg-slate-900/95 border-t border-slate-700/80 px-3 py-1 flex flex-wrap items-center gap-4 text-[10px] font-mono text-slate-300">
+    <div className="absolute bottom-0 left-0 right-0 z-30 bg-rpg-ink border-t-2 border-rpg-line px-3 py-1 flex flex-wrap items-center gap-4 text-[10px] font-mono text-rpg-dim">
       <span>
         Cursor: {cursor.inside ? `(${cursor.x}, ${cursor.y})` : '—'} / {map.width}×{map.height}
       </span>
@@ -405,12 +399,12 @@ export const StudioStatusBar: React.FC<StudioStatusBarProps> = ({
         Objects: {map.objects.length} · Zones: {map.interactionZones.length} · Spawns:{' '}
         {(map.spawnPoints || []).length}
       </span>
-      <span className="text-amber-300">Selected: {selectionText}</span>
+      <span className="text-rpg-gold">Selected: {selectionText}</span>
       <span className="flex-1" />
-      <span className={isDirty ? 'text-amber-300' : 'text-emerald-300'}>
+      <span className={isDirty ? 'text-rpg-gold' : 'text-rpg-green'}>
         {isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Saved'}
       </span>
-      <span className="flex items-center gap-1 text-slate-400">
+      <span className="flex items-center gap-1 text-rpg-dim">
         <Info className="w-3 h-3" /> V/B/E/C/H/O/N tools · G grid · Ctrl+Z undo · Ctrl+S save
       </span>
     </div>

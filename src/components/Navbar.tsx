@@ -67,11 +67,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header className="flex items-center justify-between gap-8 px-6 py-3 bg-slate-900/95 backdrop-blur border-b border-slate-800 text-slate-100 z-30 select-none">
+    <header className="rpg-bar flex items-center justify-between gap-8 px-6 py-3 z-30 select-none">
       {/* Zone 1: Wordmark & Live Weather Pill */}
       <div className="flex items-center gap-3 shrink-0">
-        <a href="/" className="text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 flex items-center gap-2">
-          <span className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center text-xs font-mono font-bold text-white shadow-sm">
+        <a href="/" className="pixel-title text-[10px] whitespace-nowrap shrink-0 flex items-center gap-2">
+          <span className="w-6 h-6 rpg-chip rpg-chip-gold !text-[11px] flex items-center justify-center">
             G
           </span>
           GatherGrid
@@ -80,10 +80,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Live Weather Indicator Pill */}
         <button
           onClick={onOpenWeatherModal}
-          className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 text-slate-300 text-xs transition-colors cursor-pointer"
+          className="rpg-btn rpg-btn-plain rpg-btn-round hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-xs"
           title="Click to view HQ Weather Simulation"
         >
-          <CloudSun className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <CloudSun className="w-3.5 h-3.5 text-rpg-gold shrink-0" />
           <span className="truncate max-w-44">
             {currentWeather
               ? `Manila: ${currentWeather.temperatureC}°C · ${currentWeather.conditionDescription}`
@@ -93,31 +93,31 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Live Multiplayer Connection Status */}
         <div className="hidden sm:flex items-center gap-2 text-xs">
-          <span aria-hidden="true" className="text-slate-600">·</span>
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-800/80 border border-slate-700/60 font-mono text-[11px]">
+          <span aria-hidden="true" className="text-rpg-dim opacity-60">·</span>
+          <div className="rpg-inset flex items-center gap-1.5 px-2 py-0.5 font-mono text-[11px]">
             {connectionState === 'connected' && (
               <>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400/50" />
-                <span className="text-emerald-300 font-medium">{onlineCount} Online</span>
-                {pingMs > 0 && <span className="text-slate-400 text-[10px]">({pingMs}ms)</span>}
+                <span className="text-rpg-green font-medium">{onlineCount} Online</span>
+                {pingMs > 0 && <span className="text-rpg-dim text-[10px]">({pingMs}ms)</span>}
               </>
             )}
             {connectionState === 'connecting' && (
               <>
                 <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
-                <span className="text-sky-300">Connecting...</span>
+                <span className="text-rpg-title">Connecting...</span>
               </>
             )}
             {connectionState === 'reconnecting' && (
               <>
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce" />
-                <span className="text-amber-300 font-medium">Reconnecting...</span>
+                <span className="text-rpg-gold font-medium">Reconnecting...</span>
               </>
             )}
             {(connectionState === 'disconnected' || connectionState === 'failed') && (
               <>
                 <span className="w-2 h-2 rounded-full bg-rose-400" />
-                <span className="text-slate-400">Offline</span>
+                <span className="text-rpg-dim">Offline</span>
               </>
             )}
           </div>
@@ -125,7 +125,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Zone 2: Floor Navigation Links */}
-      <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-300">
+      <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-rpg-dim">
         {floors.map((floor) => {
           const isActive = currentMapId === floor.id;
           return (
@@ -136,7 +136,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onSelectMap(floor.id);
               }}
               className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer py-1 ${
-                isActive ? 'text-white border-b-2 border-indigo-500 font-semibold' : 'text-slate-400'
+                isActive ? 'text-rpg-gold border-b-2 border-rpg-gold font-semibold' : 'text-rpg-dim'
               }`}
             >
               <MapPin className="w-3.5 h-3.5 opacity-70" />
@@ -155,14 +155,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             aria-expanded={isDirectoryOpen}
             aria-controls="colleagues-directory"
             title={isDirectoryOpen ? 'Collapse Colleagues Directory' : 'Expand Colleagues Directory'}
-            className={`relative p-2 rounded-lg transition-colors cursor-pointer ${
-              isDirectoryOpen
-                ? 'bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white'
-            }`}
+            className={`rpg-btn relative p-2 cursor-pointer ${isDirectoryOpen ? 'rpg-btn-gold' : 'rpg-btn-plain'}`}
           >
             <Users className="w-4 h-4" />
-            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-indigo-600 border border-slate-900 text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
+            <span className="rpg-chip rpg-chip-gold absolute -top-1.5 -right-1.5 !min-w-4 h-4 px-1 rounded-full flex items-center justify-center tabular-nums">
               {onlineCount}
             </span>
           </button>
@@ -172,7 +168,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button
           onClick={onToggleMute}
           title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
-          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+          className="rpg-btn rpg-btn-plain p-2 cursor-pointer"
         >
           {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
         </button>
@@ -184,14 +180,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               sounds.playInteract();
               onToggleEditor();
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm ${
-              isEditorOpen
-                ? 'bg-amber-500 text-slate-950 font-bold'
-                : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40'
+            className={`rpg-btn px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
+              isEditorOpen ? 'rpg-btn-gold font-bold' : 'rpg-btn-plain'
             }`}
             title="Open the map Studio (World/Studio modes)"
           >
-            <Wrench className="w-3.5 h-3.5" />
+            <Wrench className={`w-3.5 h-3.5 ${isEditorOpen ? '' : 'text-rpg-gold'}`} />
             <span>{isEditorOpen ? 'Exit Studio' : 'Studio'}</span>
           </button>
         )}
@@ -202,7 +196,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             sounds.playInteract();
             onOpenAvatarModal();
           }}
-          className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+          className="rpg-btn rpg-btn-gold px-3 py-1.5 text-xs font-semibold whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer"
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>Avatar</span>
@@ -210,30 +204,30 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Authentication Account State */}
         {user ? (
-          <div className="flex items-center gap-2 pl-1 border-l border-slate-800">
+          <div className="flex items-center gap-2 pl-2 border-l-2 border-rpg-line">
             <div className="flex items-center gap-1.5">
               {user.photoURL ? (
                 <img
                   src={user.photoURL}
                   alt={user.displayName || 'User'}
-                  className="w-7 h-7 rounded-full border border-slate-700 object-cover"
+                  className="w-7 h-7 rounded-full border-2 border-rpg-edge object-cover"
                   referrerPolicy="no-referrer"
                 />
               ) : (
                 <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs text-white shadow-inner"
+                  className="w-7 h-7 rounded-full border-2 border-rpg-edge flex items-center justify-center font-bold text-xs text-white shadow-inner"
                   style={{ backgroundColor: profile?.avatarConfig?.shirtColor || '#2563eb' }}
                 >
                   {(profile?.name || user.displayName || 'U').charAt(0)}
                 </div>
               )}
               <div className="hidden xl:flex flex-col text-left">
-                <span className="text-xs font-semibold text-white leading-tight truncate max-w-24">
+                <span className="text-[11px] font-semibold text-rpg-text leading-tight truncate max-w-24">
                   {profile?.name || user.displayName}
                 </span>
-                <span className="text-[10px] font-mono text-slate-400 flex items-center gap-0.5">
+                <span className="text-[10px] font-mono text-rpg-dim flex items-center gap-0.5">
                   {isAdmin ? (
-                    <span className="text-amber-400 font-bold flex items-center gap-0.5">
+                    <span className="text-rpg-gold font-bold flex items-center gap-0.5">
                       <Shield className="w-2.5 h-2.5" /> ADMIN
                     </span>
                   ) : (
@@ -248,7 +242,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 sounds.playInteract();
                 signOut();
               }}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="rpg-btn rpg-btn-plain p-1.5 cursor-pointer"
               title="Sign Out"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -260,7 +254,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               sounds.playInteract();
               onOpenLoginModal();
             }}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            className="rpg-btn px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
           >
             <LogIn className="w-3.5 h-3.5" />
             <span>Sign In</span>

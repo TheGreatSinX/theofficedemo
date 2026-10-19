@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+/* ============================================================
+   GatherGrid RPG theme — classic RPG Maker style windowskin.
+   Tokens generate Tailwind utilities (font-pixel, text-rpg-*,
+   bg-rpg-*, border-rpg-*), component classes below are defined
+   UNLAYERED so they intentionally win over Tailwind utilities.
+   ============================================================ */
+
+@theme {
+  --font-body: "VT323", "Plus Jakarta Sans", system-ui, -apple-system, "Noto Color Emoji", sans-serif;
+  --font-pixel: "Press Start 2P", "VT323", "Noto Color Emoji", monospace;
+
+  --color-rpg-ink: #071230;      /* outer dark edge / deep background */
+  --color-rpg-inset: #0a1740;    /* sunken content background */
+  --color-rpg-win1: #1b3a8a;     /* window gradient top */
+  --color-rpg-win2: #0e2158;     /* window gradient bottom */
+  --color-rpg-line: #3f66c4;     /* inner border / divider */
+  --color-rpg-edge: #b8d8ff;     /* light windowskin border */
+  --color-rpg-text: #eaf4ff;     /* primary text */
+  --color-rpg-dim: #9db8e8;      /* secondary text */
+  --color-rpg-title: #cfe4ff;    /* window titles */
+  --color-rpg-gold: #ffd75f;     /* highlight / primary action */
+  --color-rpg-green: #7ee787;    /* success */
+  --color-rpg-red: #ff9c9c;      /* danger / error */
+}
+
 @layer base {
   body {
     margin: 0;
@@ -7,7 +32,15 @@
     overflow: hidden;
     user-select: none;
     -webkit-font-smoothing: antialiased;
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-body);
+    font-size: 16px;
+    letter-spacing: 0.2px;
+    color: var(--color-rpg-text);
+  }
+
+  ::selection {
+    background: var(--color-rpg-gold);
+    color: var(--color-rpg-ink);
   }
 }
 
@@ -16,4 +49,279 @@ canvas {
   image-rendering: -webkit-crisp-edges;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+}
+
+/* ------------------------------------------------------------
+   Windows, panels & insets
+   ------------------------------------------------------------ */
+
+.rpg-window {
+  font-family: var(--font-body);
+  color: var(--color-rpg-text);
+  background: linear-gradient(180deg, var(--color-rpg-win1), var(--color-rpg-win2)) !important;
+  border: 3px solid var(--color-rpg-edge) !important;
+  border-radius: 8px !important;
+  box-shadow:
+    0 0 0 2px var(--color-rpg-ink),
+    inset 0 0 0 2px var(--color-rpg-ink),
+    0 12px 32px rgb(0 0 0 / 0.55) !important;
+}
+
+.rpg-window-title {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0)) !important;
+  border-bottom: 2px solid var(--color-rpg-line) !important;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.rpg-inset {
+  background: var(--color-rpg-inset) !important;
+  border: 2px solid var(--color-rpg-line) !important;
+  border-radius: 4px !important;
+  box-shadow: inset 0 2px 0 rgb(0 0 0 / 0.45) !important;
+}
+
+.rpg-inset-active {
+  border-color: var(--color-rpg-gold) !important;
+  box-shadow:
+    0 0 0 2px rgb(255 215 95 / 0.35),
+    inset 0 2px 0 rgb(0 0 0 / 0.45) !important;
+}
+
+.rpg-app-bg {
+  background: radial-gradient(1200px 700px at 50% -10%, #12265c 0%, #0a1540 45%, #060d24 100%) !important;
+}
+
+/* ------------------------------------------------------------
+   Buttons
+   ------------------------------------------------------------ */
+
+.rpg-btn {
+  --rpg-b1: #3f74d8;
+  --rpg-b2: #22489c;
+  color: #f4f9ff !important;
+  background: linear-gradient(180deg, var(--rpg-b1), var(--rpg-b2)) !important;
+  border: 2px solid var(--color-rpg-edge) !important;
+  border-radius: 6px !important;
+  box-shadow:
+    0 0 0 2px var(--color-rpg-ink),
+    inset 0 2px 0 rgb(255 255 255 / 0.22),
+    inset 0 -3px 0 rgb(0 0 0 / 0.35) !important;
+  text-shadow: 1px 1px 0 rgb(0 0 0 / 0.55);
+  transition: filter 0.12s ease, translate 0.06s ease;
+  cursor: pointer;
+}
+
+.rpg-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.rpg-btn:active:not(:disabled) {
+  translate: 0 2px;
+  box-shadow:
+    0 0 0 2px var(--color-rpg-ink),
+    inset 0 2px 0 rgb(0 0 0 / 0.3) !important;
+}
+
+.rpg-btn:disabled {
+  filter: saturate(0.35) brightness(0.75);
+  cursor: not-allowed;
+}
+
+.rpg-btn-gold {
+  --rpg-b1: #ffce56;
+  --rpg-b2: #c98a1c;
+  color: #2a1904 !important;
+  text-shadow: 1px 1px 0 rgb(255 255 255 / 0.3);
+}
+
+.rpg-btn-danger {
+  --rpg-b1: #e06060;
+  --rpg-b2: #a53232;
+}
+
+.rpg-btn-plain {
+  --rpg-b1: #2c50a6;
+  --rpg-b2: #18306e;
+}
+
+.rpg-btn-light {
+  --rpg-b1: #ffffff;
+  --rpg-b2: #dbe7ff;
+  color: #16233f !important;
+  text-shadow: none;
+}
+
+.rpg-btn-round {
+  border-radius: 9999px !important;
+}
+
+/* Top bars / toolbars */
+.rpg-bar {
+  font-family: var(--font-body);
+  color: var(--color-rpg-text);
+  background: linear-gradient(180deg, var(--color-rpg-win1), var(--color-rpg-win2)) !important;
+  border-bottom: 3px solid var(--color-rpg-edge) !important;
+  box-shadow: 0 2px 0 0 var(--color-rpg-ink), 0 8px 20px rgb(0 0 0 / 0.45);
+}
+
+/* Tabs (e.g. Maps / Connections in the World Manager) */
+.rpg-tab {
+  color: var(--color-rpg-dim) !important;
+  background: linear-gradient(180deg, rgb(63 102 196 / 0.4), rgb(24 48 110 / 0.4)) !important;
+  border: 2px solid var(--color-rpg-line) !important;
+  border-bottom: none !important;
+  border-radius: 6px 6px 0 0 !important;
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / 0.08);
+  cursor: pointer;
+}
+
+.rpg-tab-active {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, #3f74d8, #22489c) !important;
+  border-color: var(--color-rpg-edge) !important;
+}
+
+/* ------------------------------------------------------------
+   Chips / badges
+   ------------------------------------------------------------ */
+
+.rpg-chip {
+  font-family: var(--font-pixel) !important;
+  font-size: 8px !important;
+  letter-spacing: 0.5px;
+  line-height: 1.6;
+  text-transform: uppercase;
+  color: var(--color-rpg-dim);
+  background: var(--color-rpg-inset);
+  border: 2px solid var(--color-rpg-line);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgb(7 18 48 / 0.6);
+  white-space: nowrap;
+}
+
+.rpg-chip-gold {
+  color: #2a1904;
+  background: var(--color-rpg-gold);
+  border-color: #fff2c4;
+}
+
+.rpg-chip-green {
+  color: #06230d;
+  background: var(--color-rpg-green);
+  border-color: #d4ffdb;
+}
+
+.rpg-chip-red {
+  color: #2a0505;
+  background: var(--color-rpg-red);
+  border-color: #ffd9d9;
+}
+
+/* ------------------------------------------------------------
+   Inputs
+   ------------------------------------------------------------ */
+
+.rpg-input {
+  background: var(--color-rpg-inset) !important;
+  border: 2px solid var(--color-rpg-line) !important;
+  border-radius: 4px !important;
+  color: var(--color-rpg-text) !important;
+  box-shadow: inset 0 2px 0 rgb(0 0 0 / 0.45) !important;
+  outline: none !important;
+}
+
+.rpg-input:focus {
+  border-color: var(--color-rpg-edge) !important;
+  box-shadow:
+    inset 0 2px 0 rgb(0 0 0 / 0.45),
+    0 0 0 2px rgb(184 216 255 / 0.25) !important;
+}
+
+.rpg-input::placeholder {
+  color: rgb(157 184 232 / 0.6);
+}
+
+select.rpg-input option {
+  background: var(--color-rpg-inset);
+  color: var(--color-rpg-text);
+}
+
+/* ------------------------------------------------------------
+   Typography helpers
+   ------------------------------------------------------------ */
+
+.pixel-font {
+  font-family: var(--font-pixel);
+}
+
+.pixel-title {
+  font-family: var(--font-pixel);
+  letter-spacing: 0.5px;
+  color: var(--color-rpg-title);
+  text-shadow: 0 2px 0 rgb(7 18 48 / 0.9);
+}
+
+/* ------------------------------------------------------------
+   Edge color helpers (toasts & status)
+   ------------------------------------------------------------ */
+
+.rpg-edge-gold {
+  border-color: var(--color-rpg-gold) !important;
+}
+
+.rpg-edge-green {
+  border-color: var(--color-rpg-green) !important;
+}
+
+.rpg-edge-red {
+  border-color: var(--color-rpg-red) !important;
+}
+
+/* ------------------------------------------------------------
+   Global micro-text normalization (VT323 legibility)
+   ------------------------------------------------------------ */
+
+.text-\[9px\] {
+  font-size: 11px;
+}
+
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 13px;
+}
+
+.text-xs {
+  font-size: 14px;
+}
+
+.text-sm {
+  font-size: 15px;
+}
+
+/* ------------------------------------------------------------
+   Chunky pixel scrollbars
+   ------------------------------------------------------------ */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f74d8 #071230;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #071230;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #4a80e2, #22489c);
+  border: 3px solid #071230;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #5b8fe8, #2a55b4);
 }

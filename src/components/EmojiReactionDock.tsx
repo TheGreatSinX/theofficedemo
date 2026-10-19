@@ -28,7 +28,7 @@ export const EmojiReactionDock: React.FC<EmojiReactionDockProps> = ({
   };
 
   return (
-    <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/90 hover:bg-slate-900 border border-slate-700/80 rounded-2xl shadow-xl backdrop-blur-md transition-all">
+    <div className="rpg-window flex items-center gap-1.5 p-1.5 transition-all">
       {/* 5 Quick Reaction Hotkey Buttons */}
       <div className="flex items-center gap-1">
         {quickSlots.map((emoji, idx) => {
@@ -40,15 +40,15 @@ export const EmojiReactionDock: React.FC<EmojiReactionDockProps> = ({
               onClick={() => handleSlotClick(emoji, idx)}
               onMouseEnter={() => setHoveredSlot(idx)}
               onMouseLeave={() => setHoveredSlot(null)}
-              className={`group relative w-10 h-10 rounded-xl flex items-center justify-center border transition-all duration-150 ${
+              className={`rpg-btn group relative w-10 h-10 flex items-center justify-center transition-all duration-150 ${
                 isActive
-                  ? 'bg-indigo-600 border-indigo-400 scale-125 z-20 shadow-lg shadow-indigo-500/50'
-                  : 'bg-slate-800/80 hover:bg-indigo-950/60 border-slate-700 hover:border-indigo-500/60 hover:scale-110 active:scale-95'
+                  ? 'rpg-btn-gold scale-125 z-20'
+                  : 'rpg-btn-plain hover:scale-110 active:scale-95'
               }`}
               title={`Reaction [${idx + 1}] — Press ${idx + 1} or click`}
             >
               {/* Hotkey Number Badge */}
-              <span className="absolute -top-1.5 -left-1 px-1 py-0.2 rounded-md bg-slate-950/90 text-indigo-300 border border-slate-700 font-mono text-[9px] font-bold leading-none shadow-sm pointer-events-none group-hover:border-indigo-400 group-hover:text-white transition-colors">
+              <span className="rpg-chip absolute -top-1.5 -left-1 px-1 py-0.2 text-[9px] leading-none pointer-events-none transition-colors">
                 {idx + 1}
               </span>
 
@@ -67,7 +67,7 @@ export const EmojiReactionDock: React.FC<EmojiReactionDockProps> = ({
         })}
       </div>
 
-      <div className="w-[1px] h-6 bg-slate-800 mx-0.5" />
+      <div className="w-[1px] h-6 bg-rpg-ink mx-0.5" />
 
       {/* Full Google Emoji Picker Trigger */}
       <button
@@ -76,10 +76,10 @@ export const EmojiReactionDock: React.FC<EmojiReactionDockProps> = ({
           sounds.playInteract();
           onOpenEmojiPicker();
         }}
-        className="flex items-center gap-1.5 px-2.5 h-10 rounded-xl bg-slate-800/80 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500/60 text-slate-200 hover:text-white transition-all hover:scale-105 active:scale-95 text-xs font-semibold"
+        className="rpg-btn rpg-btn-plain flex items-center gap-1.5 px-2.5 h-10 transition-all hover:scale-105 active:scale-95 text-xs font-semibold"
         title="Open Full Google Emoji Picker (All Google Emojis)"
       >
-        <Smile size={16} className="text-amber-400" />
+        <Smile size={16} className="text-rpg-gold" />
         <span className="hidden sm:inline">Google Emojis</span>
       </button>
     </div>

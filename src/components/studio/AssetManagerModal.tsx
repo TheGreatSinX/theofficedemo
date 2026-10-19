@@ -39,7 +39,7 @@ interface DraftState {
 }
 
 const badge =
-  'px-1.5 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 whitespace-nowrap';
+  'rpg-chip px-1.5 py-0.5 text-[10px] font-medium flex items-center gap-1 whitespace-nowrap';
 
 export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, onClose }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -142,30 +142,30 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
-      <div className="w-[900px] max-w-[96vw] max-h-[88vh] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-700/80 flex items-center gap-3">
-          <Database className="w-4 h-4 text-indigo-400" />
-          <span className="text-sm font-semibold text-white">Asset Manager</span>
-          <span className="text-[10px] text-slate-400">
+      <div className="w-[900px] max-w-[96vw] max-h-[88vh] rpg-window flex flex-col overflow-hidden">
+        <div className="rpg-window-title px-4 py-3 flex items-center gap-3">
+          <Database className="w-4 h-4 text-rpg-gold" />
+          <span className="pixel-title text-[10px]">Asset Manager</span>
+          <span className="text-[10px] text-rpg-dim">
             {library.length} asset(s) · {cloudCount} cloud-mirrored · local IndexedDB is the source of truth
           </span>
-          <button className="ml-auto text-slate-400 hover:text-white cursor-pointer" onClick={onClose}>
+          <button className="rpg-btn rpg-btn-danger ml-auto p-1 cursor-pointer" onClick={onClose}>
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
           {/* Import area */}
-          <div className="rounded-xl border border-dashed border-slate-600/80 bg-slate-950/40 p-4 flex flex-col gap-3">
+          <div className="rpg-inset p-4 flex flex-col gap-3">
             <div className="flex items-center gap-3">
               <button
-                className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white cursor-pointer flex items-center gap-2"
+                className="rpg-btn rpg-btn-gold px-3 py-2 text-xs font-semibold cursor-pointer flex items-center gap-2"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={busy}
               >
                 <Upload className="w-4 h-4" /> Choose images…
               </button>
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-rpg-dim">
                 RPG Maker MZ conventions detected automatically: A1–A5 autotiles, B–E tilesets,{' '}
                 <span className="font-mono">$</span> single characters, <span className="font-mono">!</span> no-shift sheets.
               </span>
@@ -184,15 +184,16 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
 
             {drafts.length > 0 && (
               <div className="flex flex-col gap-2">
-                <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-[11px] text-rpg-text cursor-pointer">
                   <input
                     type="checkbox"
+                    className="accent-rpg-gold"
                     checked={allowDuplicates}
                     onChange={(e) => setAllowDuplicates(e.target.checked)}
                   />
                   Import duplicates as copies
                   <button
-                    className="ml-auto px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-[11px] text-white cursor-pointer"
+                    className="rpg-btn rpg-btn-gold ml-auto px-2.5 py-1 text-[11px] cursor-pointer"
                     onClick={() => void importAll()}
                   >
                     Import all valid
@@ -202,13 +203,13 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                 {drafts.map((d, index) => (
                   <div
                     key={`${d.draft.file.name}_${index}`}
-                    className="rounded-lg border border-slate-700/70 bg-slate-900/70 p-2 flex gap-3"
+                    className="rpg-inset p-2 flex gap-3"
                   >
-                    <div className="w-16 h-16 rounded bg-slate-950/70 border border-slate-700/60 flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="rpg-inset w-16 h-16 flex items-center justify-center overflow-hidden shrink-0">
                       {d.draft.previewUrl ? (
                         <img src={d.draft.previewUrl} alt={d.name} className="max-w-full max-h-full object-contain" />
                       ) : (
-                        <Upload className="w-5 h-5 text-slate-600" />
+                        <Upload className="w-5 h-5 text-rpg-dim" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col gap-1.5">
@@ -221,7 +222,7 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                               prev.map((s, i) => (i === index ? { ...s, name: e.target.value } : s))
                             )
                           }
-                          className="bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-xs text-white w-48 focus:outline-none focus:border-indigo-500"
+                          className="rpg-input px-2 py-0.5 text-xs w-48"
                         />
                         <select
                           value={d.category}
@@ -232,7 +233,7 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                               )
                             )
                           }
-                          className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-white"
+                          className="rpg-input px-1.5 py-0.5 text-[11px]"
                         >
                           {ASSET_CATEGORIES.map((c) => (
                             <option key={c.id} value={c.id}>
@@ -240,60 +241,60 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                             </option>
                           ))}
                         </select>
-                        <span className="text-[10px] text-slate-500 font-mono">
+                        <span className="text-[10px] text-rpg-dim font-mono">
                           {d.draft.file.name} · {(d.draft.file.size / 1024).toFixed(0)} KB
                         </span>
                         {d.draft.rpgMakerFamily && (
-                          <span className={badge + ' bg-indigo-950 text-indigo-300 border border-indigo-700/60'}>
+                          <span className={badge}>
                             {d.draft.rpgMakerFamily}
                           </span>
                         )}
                         {d.draft.isDollar && (
-                          <span className={badge + ' bg-amber-950 text-amber-300 border border-amber-700/60'}>$ single</span>
+                          <span className={badge + ' rpg-chip-gold'}>$ single</span>
                         )}
                         {d.draft.isBang && (
-                          <span className={badge + ' bg-slate-800 text-slate-300 border border-slate-600/60'}>! no-shift</span>
+                          <span className={badge}>! no-shift</span>
                         )}
                       </div>
-                      <div className="text-[10px] text-slate-400 font-mono">
+                      <div className="text-[10px] text-rpg-dim font-mono">
                         frame {d.draft.frameWidth}×{d.draft.frameHeight}px · grid {d.draft.columns}×{d.draft.rows} ·
                         layout {d.draft.layout}
                         {d.draft.duplicateOf ? ` · duplicate of ${assetRegistry.get(d.draft.duplicateOf)?.name ?? d.draft.duplicateOf}` : ''}
                       </div>
                       {d.validation.warnings.length > 0 && (
-                        <div className="text-[10px] text-amber-300 flex items-start gap-1">
+                        <div className="text-[10px] text-rpg-gold flex items-start gap-1">
                           <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
                           <span>{d.validation.warnings.join(' ')}</span>
                         </div>
                       )}
                       {d.validation.errors.length > 0 && (
-                        <div className="text-[10px] text-red-300 flex items-start gap-1">
+                        <div className="text-[10px] text-rpg-red flex items-start gap-1">
                           <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
                           <span>{d.validation.errors.join(' ')}</span>
                         </div>
                       )}
                       {d.importing && (
-                        <div className="w-full h-1.5 bg-slate-800 rounded overflow-hidden">
+                        <div className="w-full h-1.5 bg-rpg-ink rounded overflow-hidden">
                           <div
-                            className="h-full bg-indigo-500 transition-all"
+                            className="h-full bg-rpg-gold transition-all"
                             style={{ width: `${d.progress}%` }}
                           />
                         </div>
                       )}
-                      {d.importing && <div className="text-[10px] text-indigo-300">{d.stage}</div>}
-                      {d.error && <div className="text-[10px] text-red-300">{d.error}</div>}
+                      {d.importing && <div className="text-[10px] text-rpg-gold">{d.stage}</div>}
+                      {d.error && <div className="text-[10px] text-rpg-red">{d.error}</div>}
                       {d.done && (
-                        <div className="text-[10px] text-emerald-300 flex items-center gap-1">
+                        <div className="text-[10px] text-rpg-green flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3" /> Imported
                         </div>
                       )}
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
                       <button
-                        className={`px-2.5 py-1 rounded-md text-[11px] cursor-pointer ${
+                        className={`rpg-btn px-2.5 py-1 text-[11px] cursor-pointer ${
                           d.done
-                            ? 'bg-slate-800 text-slate-500 cursor-default'
-                            : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            ? 'cursor-default'
+                            : 'rpg-btn-gold'
                         }`}
                         disabled={d.importing || d.done || !d.validation.ok}
                         onClick={() => void importDraft(index)}
@@ -301,7 +302,7 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                         {d.done ? 'Done' : 'Import'}
                       </button>
                       <button
-                        className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 cursor-pointer"
+                        className="rpg-btn rpg-btn-plain px-2.5 py-1 text-[11px] cursor-pointer"
                         onClick={() => setDrafts((prev) => prev.filter((_, i) => i !== index))}
                       >
                         Remove
@@ -315,9 +316,9 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
 
           {/* Library */}
           <div className="flex flex-col gap-2">
-            <div className="text-xs font-semibold text-white">Library</div>
+            <div className="text-xs font-semibold text-rpg-text">Library</div>
             {library.length === 0 ? (
-              <div className="text-[11px] text-slate-500">
+              <div className="text-[11px] text-rpg-dim">
                 No assets yet. Imported images live in IndexedDB on this device and their metadata is
                 mirrored to Firestore (plus Firebase Storage when configured) so other clients can use them.
               </div>
@@ -326,32 +327,30 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                 {library.map((asset) => (
                   <div
                     key={asset.id}
-                    className="rounded-lg border border-slate-700/70 bg-slate-950/40 p-2 flex gap-2"
+                    className="rpg-inset p-2 flex gap-2"
                   >
-                    <div className="w-14 h-14 rounded bg-slate-900 border border-slate-700/60 flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="rpg-inset w-14 h-14 flex items-center justify-center overflow-hidden shrink-0">
                       {asset.thumbnailDataUrl ? (
                         <img src={asset.thumbnailDataUrl} alt={asset.name} className="max-w-full max-h-full object-contain" />
                       ) : (
-                        <Database className="w-5 h-5 text-slate-600" />
+                        <Database className="w-5 h-5 text-rpg-dim" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                      <div className="text-[11px] text-slate-100 truncate" title={asset.name}>
+                      <div className="text-[11px] text-rpg-text truncate" title={asset.name}>
                         {asset.name}
                       </div>
-                      <div className="text-[9px] text-slate-500 font-mono truncate">
+                      <div className="text-[9px] text-rpg-dim font-mono truncate">
                         {asset.width}×{asset.height} · {asset.columns}×{asset.rows} @{asset.frameWidth}px
                       </div>
                       <div className="flex items-center gap-1 flex-wrap">
-                        <span className={badge + ' bg-slate-800 text-slate-300 border border-slate-600/60'}>
+                        <span className={badge}>
                           {asset.category}
                         </span>
                         <span
                           className={
                             badge +
-                            (asset.storageBackend === 'firebase'
-                              ? ' bg-emerald-950 text-emerald-300 border border-emerald-700/60'
-                              : ' bg-slate-800 text-slate-300 border border-slate-600/60')
+                            (asset.storageBackend === 'firebase' ? ' rpg-chip-green' : '')
                           }
                         >
                           {asset.storageBackend === 'firebase' ? (
@@ -367,13 +366,13 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                       </div>
                       <div className="flex gap-1 mt-1">
                         <button
-                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 cursor-pointer flex items-center gap-0.5"
+                          className="rpg-btn rpg-btn-plain px-1.5 py-0.5 text-[10px] cursor-pointer flex items-center gap-0.5"
                           onClick={() => setEditing(asset)}
                         >
                           <Pencil className="w-3 h-3" /> Edit
                         </button>
                         <button
-                          className="px-1.5 py-0.5 rounded bg-red-950/70 hover:bg-red-900/70 border border-red-800/60 text-[10px] text-red-200 cursor-pointer flex items-center gap-0.5"
+                          className="rpg-btn rpg-btn-danger px-1.5 py-0.5 text-[10px] cursor-pointer flex items-center gap-0.5"
                           onClick={() => {
                             if (window.confirm(`Delete asset "${asset.name}"? Maps using it will show placeholders.`)) {
                               void assetRegistry.deleteAsset(asset.id).then(() => setLibrary(assetRegistry.list()));
@@ -393,8 +392,8 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
 
         {/* Edit metadata dialog */}
         {editing && (
-          <div className="border-t border-slate-700/80 bg-slate-950/70 px-4 py-3 flex flex-wrap items-end gap-3">
-            <span className="text-xs font-semibold text-white">Edit: {editing.name}</span>
+          <div className="rpg-inset px-4 py-3 flex flex-wrap items-end gap-3">
+            <span className="text-xs font-semibold text-rpg-text">Edit: {editing.name}</span>
             <TextField
               label="Name"
               value={editing.name}
@@ -435,7 +434,7 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
               onChange={(rows) => setEditing({ ...editing, rows: Math.round(rows) })}
             />
             <button
-              className="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-xs text-white cursor-pointer"
+              className="rpg-btn rpg-btn-gold px-2.5 py-1 text-xs cursor-pointer"
               onClick={() => {
                 void assetRegistry
                   .updateAsset(editing.id, {
@@ -453,7 +452,7 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
               Save metadata
             </button>
             <button
-              className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer"
+              className="rpg-btn rpg-btn-plain px-2.5 py-1 text-xs cursor-pointer"
               onClick={() => setEditing(null)}
             >
               Cancel

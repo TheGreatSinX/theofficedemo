@@ -1249,7 +1249,7 @@ function VirtualOfficeApp() {
   // Render
   // -------------------------------------------------------------------------
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+    <div className="rpg-app-bg flex flex-col h-screen w-screen text-rpg-text overflow-hidden">
       <Navbar
         currentMapId={currentMapId}
         onSelectMap={(mapId) => openMap(mapId)}
@@ -1418,12 +1418,12 @@ function VirtualOfficeApp() {
             {toasts.map((toast) => (
               <div
                 key={toast.id}
-                className={`px-4 py-2.5 rounded-lg text-xs font-medium shadow-xl border backdrop-blur max-w-sm ${
+                className={`rpg-window px-4 py-2.5 text-xs font-medium max-w-sm ${
                   toast.kind === 'success'
-                    ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-100'
+                    ? 'rpg-edge-green'
                     : toast.kind === 'error'
-                      ? 'bg-red-950/90 border-red-500/50 text-red-100'
-                      : 'bg-slate-900/90 border-slate-600/60 text-slate-100'
+                      ? 'rpg-edge-red'
+                      : 'rpg-edge-gold'
                 }`}
               >
                 {toast.message}

@@ -140,39 +140,39 @@ export const MiniMap: React.FC<MiniMapProps> = ({
     return (
       <button
         onClick={onToggle}
-        className="absolute top-16 left-4 z-20 px-3 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs font-medium flex items-center gap-1.5 shadow-lg backdrop-blur transition-colors cursor-pointer"
+        className="rpg-btn rpg-btn-plain absolute top-16 left-4 z-20 px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
         title="Toggle Mini-map [M]"
       >
-        <Map className="w-3.5 h-3.5 text-indigo-400" />
+        <Map className="w-3.5 h-3.5 text-rpg-gold" />
         <span>Map</span>
       </button>
     );
   }
 
   return (
-    <div className="absolute top-16 left-4 z-20 bg-slate-900/95 border border-slate-700/80 rounded-xl p-3 shadow-2xl backdrop-blur select-none flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="font-semibold text-white flex items-center gap-1.5">
-          <Map className="w-3.5 h-3.5 text-indigo-400" />
+    <div className="rpg-window absolute top-16 left-4 z-20 p-3 select-none flex flex-col gap-2">
+      <div className="rpg-window-title flex items-center justify-between gap-3 text-xs">
+        <span className="font-semibold text-rpg-text flex items-center gap-1.5">
+          <Map className="w-3.5 h-3.5 text-rpg-gold" />
           {mapData.name.split('(')[0]}
         </span>
         <button
           onClick={onToggle}
-          className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+          className="rpg-btn rpg-btn-plain p-0.5 cursor-pointer"
         >
           <Minimize2 className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <div className="rounded-lg overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center">
+      <div className="rpg-inset overflow-hidden flex items-center justify-center">
         <canvas ref={canvasRef} className="max-w-[200px] max-h-[160px]" />
       </div>
 
-      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+      <div className="flex items-center justify-between text-[10px] text-rpg-dim font-mono">
         <span>
           X: {playerTileX} Y: {playerTileY}
         </span>
-        <span className="text-cyan-400 font-sans">You: ● Blue</span>
+        <span className="text-rpg-title font-sans">You: ● Blue</span>
       </div>
     </div>
   );

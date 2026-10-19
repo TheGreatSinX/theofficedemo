@@ -267,3 +267,29 @@ Key invariants:
   never be self-asserted). While signed out, the app silently uses local and
   factory data — auth-gated cloud reads are skipped (see §9) — so unsigned
   guests never surface Firestore permission errors.
+
+## 12. Pixel RPG UI Reskin (shell chrome)
+
+The game world and Studio editor were already pixel-RPG; this pass reskins the
+surrounding interface chrome so the whole app reads as RPG Maker.
+
+- **Design system (`src/index.css`):** `@theme` tokens (fonts + `--color-rpg-*`
+  palette: ink/inset/window blues, light edge, gold, green, red) plus unlayered
+  component classes that intentionally win over Tailwind utilities:
+  `rpg-window`, `rpg-window-title`, `rpg-inset`, `rpg-inset-active`, `rpg-btn`
+  (+ `-gold` / `-danger` / `-plain` / `-light` / `-round`), `rpg-tab`, `rpg-chip`
+  (+ tone variants), `rpg-input`, `rpg-bar`, `pixel-title`, `pixel-font`.
+- **Typography:** Press Start 2P for headings/buttons/badges, VT323 for body
+  (micro `text-[9..11px]` hotkeys, `text-xs`/`text-sm` are normalized globally
+  so VT323 stays legible at RPG sizes). Noto Color Emoji kept for emoji
+  rendering; chunky pixel scrollbars; `::selection` in gold.
+- **Reskinned surfaces:** navbar, colleagues directory, minimap, chat drawer,
+  emote dock, controls overlay, all world-mode modals (login, avatar, weather,
+  emoji picker, interaction), Studio command bar + tool sidebar + palette +
+  inspector + status bar, all three Studio modals (worlds/maps/assets), toasts,
+  app background, and the canvas backdrop.
+- **Intentionally unchanged:** the Phaser canvas pixel art, avatar inline color
+  styles, and lucide stroke icons (they sit on beveled buttons as-is).
+- **Verification:** `tsc` + `vite build` clean; all 67 automated assertions
+  (rules 12, multiplayer 32, maps 8, editor 8, assets 7) still pass; CSS bundle
+  shrank (~63 → ~41 kB) because the old slate/indigo utilities were removed.

@@ -32,23 +32,23 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl flex flex-col gap-5 text-slate-100"
+        className="rpg-window w-full max-w-md p-6 flex flex-col gap-5"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div className="rpg-window-title flex items-center justify-between pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-sm">
+            <div className="w-8 h-8 rpg-chip rpg-chip-gold !text-[11px] flex items-center justify-center">
               G
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Sign In to GatherGrid</h2>
-              <p className="text-xs text-slate-400">Virtual Office & Pixel Workplace</p>
+              <h2 className="pixel-title text-[10px]">Sign In to GatherGrid</h2>
+              <p className="text-xs text-rpg-dim">Virtual Office & Pixel Workplace</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+            className="rpg-btn rpg-btn-danger p-1 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -56,20 +56,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
 
         {/* Error message */}
         {error && (
-          <div className="p-3 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          <div className="rpg-inset rpg-edge-red p-3 text-rpg-red text-xs flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rpg-red shrink-0 mt-0.5" />
             <div className="leading-relaxed">{error}</div>
           </div>
         )}
 
         {/* Informational description */}
-        <div className="space-y-3 text-xs text-slate-300 leading-relaxed bg-slate-950/40 p-3.5 rounded-xl border border-slate-800">
-          <div className="flex items-center gap-2 text-indigo-300 font-semibold">
-            <ShieldCheck className="w-4 h-4 text-indigo-400" />
+        <div className="rpg-inset space-y-3 text-xs text-rpg-text leading-relaxed p-3.5">
+          <div className="flex items-center gap-2 text-rpg-gold font-semibold">
+            <ShieldCheck className="w-4 h-4 text-rpg-gold" />
             <span>Secure Firebase Authentication & RBAC</span>
           </div>
-          <p className="text-slate-400 text-[11px]">
-            New accounts receive standard Employee permissions. Administrator privileges are granted via verified email whitelist (<span className="text-slate-300 font-mono">landverseauto@gmail.com</span>) or Firestore admin assignment.
+          <p className="text-rpg-dim text-[11px]">
+            New accounts receive standard Employee permissions. Administrator privileges are granted via verified email whitelist (<span className="text-rpg-text font-mono">landverseauto@gmail.com</span>) or Firestore admin assignment.
           </p>
         </div>
 
@@ -77,7 +77,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
         <button
           onClick={handleGoogleLogin}
           disabled={isLoading}
-          className="w-full py-3 px-4 rounded-xl bg-white hover:bg-slate-100 active:bg-slate-200 text-slate-900 font-semibold text-xs flex items-center justify-center gap-3 transition-colors shadow-md cursor-pointer disabled:opacity-50"
+          className="rpg-btn rpg-btn-light w-full py-3 px-4 font-semibold text-xs flex items-center justify-center gap-3 cursor-pointer"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24">
             <path
@@ -101,8 +101,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
         </button>
 
         {/* Footer info */}
-        <div className="text-center text-[11px] text-slate-500 flex items-center justify-center gap-1">
-          <Sparkles className="w-3 h-3 text-indigo-400" />
+        <div className="text-center text-[11px] text-rpg-dim flex items-center justify-center gap-1">
+          <Sparkles className="w-3 h-3 text-rpg-gold" />
           <span>Session securely restored across browser tabs</span>
         </div>
       </div>

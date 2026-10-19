@@ -121,18 +121,18 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden flex flex-col text-slate-100 max-h-[92vh]"
+        className="rpg-window w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+        <div className="rpg-window-title p-4 flex items-center justify-between">
           <div>
-            <h3 className="text-base font-bold text-white tracking-wide">Avatar Studio & Profile</h3>
-            <p className="text-xs text-slate-400">Customize your pixel-art character and team role</p>
+            <h3 className="pixel-title text-[10px]">Avatar Studio & Profile</h3>
+            <p className="text-xs text-rpg-dim">Customize your pixel-art character and team role</p>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="rpg-btn rpg-btn-danger p-1 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -141,8 +141,8 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
         {/* Content Body: Split 2 Columns */}
         <div className="p-5 overflow-y-auto grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Left Column: Live Pixel Preview & Identity */}
-          <div className="md:col-span-5 flex flex-col items-center gap-4 border-b md:border-b-0 md:border-r border-slate-800 pb-5 md:pb-0 md:pr-4">
-            <div className="w-36 h-36 rounded-xl bg-slate-950 border border-slate-700/80 p-2 flex items-center justify-center shadow-inner relative">
+          <div className="md:col-span-5 flex flex-col items-center gap-4 border-b md:border-b-0 md:border-r border-rpg-line pb-5 md:pb-0 md:pr-4">
+            <div className="rpg-inset w-36 h-36 p-2 flex items-center justify-center relative">
               <canvas
                 ref={previewCanvasRef}
                 width={128}
@@ -150,36 +150,36 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                 className="w-32 h-32"
                 style={{ imageRendering: 'pixelated' }}
               />
-              <span className="absolute bottom-1 right-2 text-[9px] font-mono text-slate-500">32x32 RPG</span>
+              <span className="absolute bottom-1 right-2 text-[9px] font-mono text-rpg-dim">32x32 RPG</span>
             </div>
 
             <div className="w-full space-y-3">
               <div>
-                <label className="text-[11px] font-medium text-slate-300 block mb-1">Display Name</label>
+                <label className="text-[11px] font-medium text-rpg-text block mb-1">Display Name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500"
+                  className="rpg-input w-full px-3 py-1.5 text-xs"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-medium text-slate-300 block mb-1">Role / Job Title</label>
+                <label className="text-[11px] font-medium text-rpg-text block mb-1">Role / Job Title</label>
                 <input
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500"
+                  className="rpg-input w-full px-3 py-1.5 text-xs"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-medium text-slate-300 block mb-1">Status</label>
+                <label className="text-[11px] font-medium text-rpg-text block mb-1">Status</label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as UserProfile['status'])}
-                  className="w-full px-3 py-1.5 text-xs bg-slate-950 border border-slate-700 rounded-lg text-slate-200"
+                  className="rpg-input w-full px-3 py-1.5 text-xs"
                 >
                   <option value="online">Online & Available</option>
                   <option value="in_meeting">In Meeting</option>
@@ -194,14 +194,14 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
           <div className="md:col-span-7 space-y-4">
             {/* Skin Tone */}
             <div>
-              <span className="text-[11px] font-semibold text-slate-300 block mb-1.5">Skin Tone</span>
+              <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Skin Tone</span>
               <div className="flex gap-2">
                 {SKIN_COLORS.map((s) => (
                   <button
                     key={s.value}
                     onClick={() => setConfig({ ...config, skinColor: s.value })}
                     className={`w-7 h-7 rounded-full border-2 transition-transform cursor-pointer ${
-                      config.skinColor === s.value ? 'border-white scale-110 shadow-sm' : 'border-transparent'
+                      config.skinColor === s.value ? 'border-rpg-gold scale-110 shadow-sm' : 'border-transparent'
                     }`}
                     style={{ backgroundColor: s.value }}
                     title={s.name}
@@ -212,16 +212,16 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
             {/* Hair Style */}
             <div>
-              <span className="text-[11px] font-semibold text-slate-300 block mb-1.5">Hairstyle</span>
+              <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Hairstyle</span>
               <div className="grid grid-cols-2 gap-1.5">
                 {HAIR_STYLES.map((h) => (
                   <button
                     key={h.id}
                     onClick={() => setConfig({ ...config, hairStyle: h.id })}
-                    className={`py-1.5 px-2.5 text-xs rounded-lg border text-left transition-colors cursor-pointer ${
+                    className={`rpg-inset py-1.5 px-2.5 text-xs text-left transition-colors cursor-pointer ${
                       config.hairStyle === h.id
-                        ? 'bg-indigo-600/20 border-indigo-500 text-white font-medium'
-                        : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                        ? 'rpg-inset-active text-rpg-text font-medium'
+                        : 'text-rpg-dim'
                     }`}
                   >
                     {h.label}
@@ -232,14 +232,14 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
             {/* Hair Color */}
             <div>
-              <span className="text-[11px] font-semibold text-slate-300 block mb-1.5">Hair Color</span>
+              <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Hair Color</span>
               <div className="flex gap-2">
                 {HAIR_COLORS.map((hc) => (
                   <button
                     key={hc.value}
                     onClick={() => setConfig({ ...config, hairColor: hc.value })}
                     className={`w-7 h-7 rounded-full border-2 transition-transform cursor-pointer ${
-                      config.hairColor === hc.value ? 'border-white scale-110 shadow-sm' : 'border-transparent'
+                      config.hairColor === hc.value ? 'border-rpg-gold scale-110 shadow-sm' : 'border-transparent'
                     }`}
                     style={{ backgroundColor: hc.value }}
                     title={hc.name}
@@ -250,14 +250,14 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
             {/* Shirt Color */}
             <div>
-              <span className="text-[11px] font-semibold text-slate-300 block mb-1.5">Shirt Color</span>
+              <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Shirt Color</span>
               <div className="flex gap-2">
                 {SHIRT_COLORS.map((sc) => (
                   <button
                     key={sc.value}
                     onClick={() => setConfig({ ...config, shirtColor: sc.value })}
                     className={`w-7 h-7 rounded-full border-2 transition-transform cursor-pointer ${
-                      config.shirtColor === sc.value ? 'border-white scale-110 shadow-sm' : 'border-transparent'
+                      config.shirtColor === sc.value ? 'border-rpg-gold scale-110 shadow-sm' : 'border-transparent'
                     }`}
                     style={{ backgroundColor: sc.value }}
                     title={sc.name}
@@ -268,14 +268,14 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
             {/* Pants Color */}
             <div>
-              <span className="text-[11px] font-semibold text-slate-300 block mb-1.5">Pants Color</span>
+              <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Pants Color</span>
               <div className="flex gap-2">
                 {PANTS_COLORS.map((pc) => (
                   <button
                     key={pc.value}
                     onClick={() => setConfig({ ...config, pantsColor: pc.value })}
                     className={`w-7 h-7 rounded-full border-2 transition-transform cursor-pointer ${
-                      config.pantsColor === pc.value ? 'border-white scale-110 shadow-sm' : 'border-transparent'
+                      config.pantsColor === pc.value ? 'border-rpg-gold scale-110 shadow-sm' : 'border-transparent'
                     }`}
                     style={{ backgroundColor: pc.value }}
                     title={pc.name}
@@ -286,16 +286,16 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
             {/* Accessory */}
             <div>
-              <span className="text-[11px] font-semibold text-slate-300 block mb-1.5">Accessory</span>
+              <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Accessory</span>
               <div className="grid grid-cols-2 gap-1.5">
                 {ACCESSORIES.map((acc) => (
                   <button
                     key={acc.id}
                     onClick={() => setConfig({ ...config, accessory: acc.id })}
-                    className={`py-1.5 px-2.5 text-xs rounded-lg border text-left transition-colors cursor-pointer ${
+                    className={`rpg-inset py-1.5 px-2.5 text-xs text-left transition-colors cursor-pointer ${
                       config.accessory === acc.id
-                        ? 'bg-indigo-600/20 border-indigo-500 text-white font-medium'
-                        : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                        ? 'rpg-inset-active text-rpg-text font-medium'
+                        : 'text-rpg-dim'
                     }`}
                   >
                     {acc.label}
@@ -307,18 +307,18 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950/40 flex justify-between items-center">
-          <p className="text-[11px] text-slate-400">Sprites are generated procedurally on 32x32 canvas</p>
+        <div className="p-4 border-t-2 border-rpg-line flex justify-between items-center">
+          <p className="text-[11px] text-rpg-dim">Sprites are generated procedurally on 32x32 canvas</p>
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors cursor-pointer"
+              className="rpg-btn rpg-btn-plain px-4 py-2 text-xs font-semibold cursor-pointer"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
-              className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+              className="rpg-btn rpg-btn-gold px-4 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             >
               <Check className="w-3.5 h-3.5" />
               Save Avatar

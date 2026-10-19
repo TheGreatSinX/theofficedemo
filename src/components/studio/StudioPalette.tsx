@@ -70,7 +70,7 @@ const TilesetSheetCanvas: React.FC<{
 
   return (
     <div
-      className="rounded-md border border-slate-700 overflow-hidden cursor-crosshair"
+      className="rounded-md border border-rpg-line overflow-hidden cursor-crosshair"
       style={{
         backgroundImage:
           'linear-gradient(45deg, #1e293b 25%, transparent 25%), linear-gradient(-45deg, #1e293b 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1e293b 75%), linear-gradient(-45deg, transparent 75%, #1e293b 75%)',
@@ -137,30 +137,28 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
   })();
 
   return (
-    <div className="absolute left-16 bottom-10 z-30 w-[290px] bg-slate-900/95 border border-slate-700/80 rounded-xl shadow-2xl backdrop-blur flex flex-col max-h-[58%]">
+    <div className="absolute left-16 bottom-10 z-30 w-[290px] rpg-window flex flex-col max-h-[58%]">
       <button
-        className="px-3 py-2 border-b border-slate-700/70 flex items-center gap-2 cursor-pointer"
+        className="px-3 py-2 rpg-window-title flex items-center gap-2 cursor-pointer"
         onClick={() => setIsOpen((v) => !v)}
       >
-        <PaletteIcon className="w-3.5 h-3.5 text-indigo-400" />
-        <span className="text-xs font-semibold text-white">Palette</span>
+        <PaletteIcon className="w-3.5 h-3.5 text-rpg-gold" />
+        <span className="text-xs font-semibold text-rpg-text">Palette</span>
         {activeTileLabel && (
-          <span className="text-[10px] text-amber-300 truncate max-w-[120px]">{activeTileLabel}</span>
+          <span className="text-[10px] text-rpg-gold truncate max-w-[120px]">{activeTileLabel}</span>
         )}
-        <span className="ml-auto text-slate-400">{isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}</span>
+        <span className="ml-auto text-rpg-dim">{isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}</span>
       </button>
 
       {isOpen && (
         <>
-          <div className="flex border-b border-slate-700/70">
+          <div className="flex border-b-2 border-rpg-line">
             {(['tiles', 'objects', 'assets'] as const).map((entry) => (
               <button
                 key={entry}
                 onClick={() => setTab(entry)}
-                className={`flex-1 px-2 py-1.5 text-[11px] font-medium cursor-pointer capitalize ${
-                  tab === entry
-                    ? 'text-white bg-slate-800/80 border-b-2 border-indigo-500'
-                    : 'text-slate-400 hover:text-slate-200'
+                className={`rpg-tab flex-1 px-2 py-1.5 text-[11px] font-medium cursor-pointer capitalize ${
+                  tab === entry ? 'rpg-tab-active' : ''
                 }`}
               >
                 {entry}
@@ -172,7 +170,7 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
             {tab === 'tiles' && (
               <>
                 <div>
-                  <div className="text-[10px] font-semibold text-slate-400 uppercase mb-1">Floors</div>
+                  <div className="text-[10px] font-semibold text-rpg-dim uppercase mb-1">Floors</div>
                   <div className="grid grid-cols-6 gap-1">
                     {BUILTIN_TILES.filter((t) => t.kind === 'floor').map((tile) => (
                       <button
@@ -181,8 +179,8 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                         onClick={() => onSelectTile(tile.id)}
                         className={`h-8 rounded border cursor-pointer ${
                           settings.selectedTileId === tile.id
-                            ? 'border-amber-400 ring-2 ring-amber-400/50'
-                            : 'border-slate-600/70 hover:border-slate-400'
+                            ? 'rpg-edge-gold ring-2 ring-rpg-gold/50'
+                            : 'border-rpg-line hover:border-rpg-edge'
                         }`}
                         style={{ backgroundColor: tile.color }}
                       />
@@ -191,7 +189,7 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-semibold text-slate-400 uppercase mb-1">Walls &amp; windows</div>
+                  <div className="text-[10px] font-semibold text-rpg-dim uppercase mb-1">Walls &amp; windows</div>
                   <div className="grid grid-cols-6 gap-1">
                     {BUILTIN_TILES.filter((t) => t.kind === 'wall').map((tile) => (
                       <button
@@ -200,8 +198,8 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                         onClick={() => onSelectTile(tile.id)}
                         className={`h-8 rounded border cursor-pointer ${
                           settings.selectedTileId === tile.id
-                            ? 'border-amber-400 ring-2 ring-amber-400/50'
-                            : 'border-slate-600/70 hover:border-slate-400'
+                            ? 'rpg-edge-gold ring-2 ring-rpg-gold/50'
+                            : 'border-rpg-line hover:border-rpg-edge'
                         }`}
                         style={{ backgroundColor: tile.color }}
                       />
@@ -210,13 +208,13 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                  <div className="text-[10px] font-semibold text-rpg-dim uppercase mb-1">
                     Imported tilesets
                   </div>
                   {builtinTilesets.length === 0 ? (
-                    <div className="text-[10px] text-slate-500">
+                    <div className="text-[10px] text-rpg-dim">
                       No imported tilesets in this map yet — add one from the{' '}
-                      <button className="text-indigo-400 underline cursor-pointer" onClick={() => setTab('assets')}>
+                      <button className="text-rpg-gold underline cursor-pointer" onClick={() => setTab('assets')}>
                         Assets tab
                       </button>
                       .
@@ -225,9 +223,9 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                     <div className="flex flex-col gap-2">
                       {builtinTilesets.map((ts) => (
                         <div key={ts.id} className="flex flex-col gap-1">
-                          <div className="text-[10px] text-slate-300 flex items-center gap-1">
+                          <div className="text-[10px] text-rpg-text flex items-center gap-1">
                             <span className="truncate">{ts.name}</span>
-                            <span className="text-slate-500 font-mono">
+                            <span className="text-rpg-dim font-mono">
                               {ts.columns}×{ts.rows} @{ts.tileSize}px
                             </span>
                           </div>
@@ -246,7 +244,7 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
             {tab === 'objects' && (
               <>
                 <div>
-                  <div className="text-[10px] font-semibold text-slate-400 uppercase mb-1">Builtin objects</div>
+                  <div className="text-[10px] font-semibold text-rpg-dim uppercase mb-1">Builtin objects</div>
                   <div className="grid grid-cols-2 gap-1">
                     {BUILTIN_OBJECTS.map((obj) => {
                       const selected =
@@ -256,14 +254,12 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                         <button
                           key={obj.type}
                           onClick={() => onSelectObject({ kind: 'builtin', type: obj.type })}
-                          className={`px-2 py-1.5 rounded border text-left cursor-pointer ${
-                            selected
-                              ? 'border-indigo-400 bg-indigo-950/60'
-                              : 'border-slate-600/70 bg-slate-800/60 hover:bg-slate-800'
+                          className={`rpg-inset px-2 py-1.5 text-left cursor-pointer ${
+                            selected ? 'rpg-inset-active' : ''
                           }`}
                         >
-                          <div className="text-[10px] text-slate-100 truncate">{obj.label}</div>
-                          <div className="text-[9px] text-slate-500">
+                          <div className="text-[10px] text-rpg-text truncate">{obj.label}</div>
+                          <div className="text-[9px] text-rpg-dim">
                             {obj.isSolidByDefault ? 'solid' : 'walkable'}
                           </div>
                         </button>
@@ -274,32 +270,32 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
 
                 {objectAssets.length > 0 && (
                   <div>
-                    <div className="text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                    <div className="text-[10px] font-semibold text-rpg-dim uppercase mb-1">
                       Imported objects
                     </div>
                     <div className="flex flex-col gap-1">
                       {objectAssets.map((asset) => (
                         <div
                           key={asset.id}
-                          className="flex items-center gap-2 px-2 py-1 rounded border border-slate-600/70 bg-slate-800/60"
+                          className="rpg-inset flex items-center gap-2 px-2 py-1"
                         >
                           {asset.thumbnailDataUrl ? (
                             <img
                               src={asset.thumbnailDataUrl}
                               alt={asset.name}
-                              className="w-8 h-8 object-contain rounded bg-slate-950/60"
+                              className="w-8 h-8 object-contain rounded bg-rpg-ink"
                             />
                           ) : (
-                            <div className="w-8 h-8 rounded bg-slate-700" />
+                            <div className="w-8 h-8 rounded bg-rpg-line" />
                           )}
                           <div className="flex-1 min-w-0">
-                            <div className="text-[10px] text-slate-100 truncate">{asset.name}</div>
-                            <div className="text-[9px] text-slate-500">
+                            <div className="text-[10px] text-rpg-text truncate">{asset.name}</div>
+                            <div className="text-[9px] text-rpg-dim">
                               {asset.width}×{asset.height} · {asset.category}
                             </div>
                           </div>
                           <button
-                            className="px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-[10px] text-white cursor-pointer flex items-center gap-0.5"
+                            className="rpg-btn rpg-btn-gold px-1.5 py-0.5 text-[10px] cursor-pointer flex items-center gap-0.5"
                             onClick={() =>
                               onSelectObject({
                                 kind: 'asset',
@@ -324,20 +320,20 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
             {tab === 'assets' && (
               <>
                 <button
-                  className="w-full px-2 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-xs text-white cursor-pointer flex items-center justify-center gap-1.5"
+                  className="rpg-btn rpg-btn-gold w-full px-2 py-1.5 text-xs cursor-pointer flex items-center justify-center gap-1.5"
                   onClick={onOpenAssetManager}
                 >
                   <ImagePlus className="w-3.5 h-3.5" /> Open Asset Manager
                 </button>
 
                 {tileAssets.length === 0 ? (
-                  <div className="text-[10px] text-slate-500">
+                  <div className="text-[10px] text-rpg-dim">
                     Import RPG Maker MZ sheets (A1–A5, B–E, $/! characters) in the Asset Manager —
                     they are stored locally and mirrored to the cloud when available.
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1">
-                    <div className="text-[10px] font-semibold text-slate-400 uppercase">
+                    <div className="text-[10px] font-semibold text-rpg-dim uppercase">
                       Tileset assets
                     </div>
                     {tileAssets.map((asset) => {
@@ -345,31 +341,31 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                       return (
                         <div
                           key={asset.id}
-                          className="flex items-center gap-2 px-2 py-1 rounded border border-slate-600/70 bg-slate-800/60"
+                          className="rpg-inset flex items-center gap-2 px-2 py-1"
                         >
                           {asset.thumbnailDataUrl ? (
                             <img
                               src={asset.thumbnailDataUrl}
                               alt={asset.name}
-                              className="w-8 h-8 object-contain rounded bg-slate-950/60"
+                              className="w-8 h-8 object-contain rounded bg-rpg-ink"
                             />
                           ) : (
-                            <div className="w-8 h-8 rounded bg-slate-700" />
+                            <div className="w-8 h-8 rounded bg-rpg-line" />
                           )}
                           <div className="flex-1 min-w-0">
-                            <div className="text-[10px] text-slate-100 truncate">{asset.name}</div>
-                            <div className="text-[9px] text-slate-500">
+                            <div className="text-[10px] text-rpg-text truncate">{asset.name}</div>
+                            <div className="text-[9px] text-rpg-dim">
                               {asset.columns}×{asset.rows} @{asset.frameWidth}px
                               {asset.rpgMakerFamily ? ` · ${asset.rpgMakerFamily}` : ''}
                             </div>
                           </div>
                           {inMap ? (
-                            <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
+                            <span className="text-[9px] text-rpg-green flex items-center gap-0.5">
                               <Check className="w-3 h-3" /> in map
                             </span>
                           ) : (
                             <button
-                              className="px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-[10px] text-white cursor-pointer"
+                              className="rpg-btn rpg-btn-gold px-1.5 py-0.5 text-[10px] cursor-pointer"
                               onClick={() => {
                                 const base = onAddTileset(asset.id);
                                 if (base !== null) {
