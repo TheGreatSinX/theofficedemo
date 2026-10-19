@@ -87,6 +87,25 @@ canvas {
     inset 0 2px 0 rgb(0 0 0 / 0.45) !important;
 }
 
+/* Character preset thumbnail: crops the down-facing idle frame out of the
+   3-column x 4-row spritesheet (column 1, row 0). */
+.character-thumb {
+  width: 42px;
+  height: 64px;
+  background-repeat: no-repeat;
+  background-size: 300% 400%;
+  background-position: 50% 0%;
+  border-radius: 2px;
+}
+
+.character-thumb-custom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(7 18 48 / 0.6);
+  border: 1px dashed var(--color-rpg-line);
+}
+
 .rpg-app-bg {
   background: radial-gradient(1200px 700px at 50% -10%, #12265c 0%, #0a1540 45%, #060d24 100%) !important;
 }

@@ -26,6 +26,7 @@ export class RemotePlayerManager {
   private localUserId: string;
   private remotePlayers: Map<string, RemotePlayerEntity> = new Map();
   private registerSpritesheetFn: (key: string, config: AvatarConfig) => void;
+  private applySpriteMetricsFn?: (sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) => void;
   private staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup;
   /** Uniform scale applied to avatar sprites (tileSize / 32). */
   private tileScale: number = 1;
@@ -42,24 +43,30 @@ export class RemotePlayerManager {
     localUserId: string,
     registerSpritesheetFn: (key: string, config: AvatarConfig) => void,
     staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup,
-    tileScale: number = 1
+    tileScale: number = 1,
+    applySpriteMetricsFn?: (sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) => void
   ) {
     this.scene = scene;
     this.localUserId = localUserId;
     this.registerSpritesheetFn = registerSpritesheetFn;
     this.staticWallsGroup = staticWallsGroup;
     this.tileScale = tileScale;
+    this.applySpriteMetricsFn = applySpriteMetricsFn;
   }
 
   /** Updates the avatar scale (called when the active map's tile size changes). */
   public setTileScale(scale: number): void {
     this.tileScale = scale;
     for (const entity of this.remotePlayers.values()) {
-      this.applySpriteMetrics(entity.sprite);
+      this.applySpriteMetrics(entity.sprite, entity.avatarConfig);
     }
   }
 
-  private applySpriteMetrics(sprite: Phaser.Physics.Arcade.Sprite): void {
+  private applySpriteMetrics(sprite: Phaser.Physics.Arcade.Sprite, config?: AvatarConfig): void {
+    if (this.applySpriteMetricsFn && config) {
+      this.applySpriteMetricsFn(sprite, config);
+      return;
+    }
     sprite.setScale(this.tileScale);
     sprite.setSize(18 * this.tileScale, 12 * this.tileScale);
     sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
@@ -107,7 +114,7 @@ export class RemotePlayerManager {
     this.registerSpritesheetFn(textureKey, playerState.avatarConfig);
 
     const sprite = this.scene.physics.add.sprite(playerState.x, playerState.y, textureKey);
-    this.applySpriteMetrics(sprite);
+    this.applySpriteMetrics(sprite, playerState.avatarConfig);
     sprite.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + playerState.y + 0.25);
 
     const idleKey = `${textureKey}_idle_${playerState.direction}`;

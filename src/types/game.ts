@@ -12,6 +12,13 @@ export interface AvatarConfig {
   shirtColor: string;
   pantsColor: string;
   accessory?: 'glasses' | 'headset' | 'badge' | 'none';
+  /**
+   * Optional hand-drawn cast preset (see `characterPresets.ts`). When present
+   * the preset spritesheet is rendered instead of the procedural avatar; the
+   * color fields above stay stored so switching back to a custom avatar keeps
+   * the previous look.
+   */
+  characterId?: string;
 }
 
 export interface UserProfile {

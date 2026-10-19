@@ -6,7 +6,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AvatarConfig, UserProfile } from '../types/game';
 import { generateAvatarSpritesheet } from '../game/pixelArtGenerator';
-import { X, Check } from 'lucide-react';
+import { CHARACTER_PRESETS, getCharacterPreset } from '../game/characterPresets';
+import { X, Check, Shirt } from 'lucide-react';
 import { sounds } from '../game/soundEffects';
 
 interface AvatarCustomizerModalProps {
@@ -75,6 +76,7 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
   const [status, setStatus] = useState<UserProfile['status']>(playerProfile.status);
   const [config, setConfig] = useState<AvatarConfig>({ ...playerProfile.avatarConfig });
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const activePreset = getCharacterPreset(config.characterId);
 
   // Sync state when opened
   useEffect(() => {
@@ -93,9 +95,39 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    const preset = getCharacterPreset(config.characterId);
+    if (preset) {
+      let cancelled = false;
+      const image = new Image();
+      image.onload = () => {
+        if (cancelled) return;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        const scale = Math.min(canvas.width / preset.frameWidth, canvas.height / preset.frameHeight);
+        const w = preset.frameWidth * scale;
+        const h = preset.frameHeight * scale;
+        // Frame (row 0, col 1) is the down-facing idle pose.
+        ctx.drawImage(
+          image,
+          preset.frameWidth,
+          0,
+          preset.frameWidth,
+          preset.frameHeight,
+          (canvas.width - w) / 2,
+          (canvas.height - h) / 2,
+          w,
+          h
+        );
+      };
+      image.src = preset.image;
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    ctx.imageSmoothingEnabled = false;
     // Generate spritesheet and grab idle down frame (frame 1, row 0: x=32, y=0, w=32, h=32)
     const sheetCanvas = generateAvatarSpritesheet(config);
     ctx.drawImage(sheetCanvas, 32, 0, 32, 32, 0, 0, 128, 128);
@@ -103,14 +135,23 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
   if (!isOpen) return null;
 
+  const selectCustomAvatar = () => {
+    const next = { ...config };
+    delete next.characterId;
+    setConfig(next);
+  };
+
   const handleSave = () => {
     sounds.playInteract();
+    // Keep undefined values out of the Firestore payload.
+    const avatarConfig: AvatarConfig = { ...config };
+    if (!avatarConfig.characterId) delete avatarConfig.characterId;
     onSaveProfile({
       ...playerProfile,
       name: name.trim() || 'Colleague',
       title: title.trim() || 'Team Member',
       status,
-      avatarConfig: config,
+      avatarConfig,
     });
     onClose();
   };
@@ -150,7 +191,9 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                 className="w-32 h-32"
                 style={{ imageRendering: 'pixelated' }}
               />
-              <span className="absolute bottom-1 right-2 text-[9px] font-mono text-rpg-dim">32x32 RPG</span>
+              <span className="absolute bottom-1 right-2 text-[9px] font-mono text-rpg-dim">
+                {activePreset ? 'RPG preset' : '32x32 RPG'}
+              </span>
             </div>
 
             <div className="w-full space-y-3">
@@ -192,6 +235,69 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
           {/* Right Column: Customization Controls */}
           <div className="md:col-span-7 space-y-4">
+            {/* Character Roster */}
+            <div>
+              <div className="flex items-baseline justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-rpg-text">Character Roster</span>
+                <span className="text-[9px] text-rpg-dim">visible to everyone</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                <button
+                  type="button"
+                  onClick={selectCustomAvatar}
+                  title="Build a custom avatar from colors"
+                  className={`rpg-inset flex flex-col items-center gap-1 p-1.5 cursor-pointer transition-colors ${
+                    !activePreset ? 'rpg-inset-active' : ''
+                  }`}
+                >
+                  <div className="character-thumb character-thumb-custom">
+                    <Shirt className="w-5 h-5 text-rpg-dim" />
+                  </div>
+                  <span
+                    className={`text-[9px] leading-tight text-center ${
+                      !activePreset ? 'text-rpg-text' : 'text-rpg-dim'
+                    }`}
+                  >
+                    Custom
+                  </span>
+                </button>
+                {CHARACTER_PRESETS.map((preset) => {
+                  const selected = config.characterId === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setConfig({ ...config, characterId: preset.id })}
+                      title={preset.tagline}
+                      className={`rpg-inset flex flex-col items-center gap-1 p-1.5 cursor-pointer transition-colors ${
+                        selected ? 'rpg-inset-active' : ''
+                      }`}
+                    >
+                      <div
+                        className="character-thumb"
+                        style={{ backgroundImage: `url(${preset.image})` }}
+                        aria-hidden="true"
+                      />
+                      <span
+                        className={`text-[9px] leading-tight text-center ${
+                          selected ? 'text-rpg-text' : 'text-rpg-dim'
+                        }`}
+                      >
+                        {preset.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {activePreset && (
+                <p className="text-[9px] text-rpg-dim mt-1.5">
+                  {activePreset.tagline}. Preset outfits override the color options below.
+                </p>
+              )}
+            </div>
+
+            {/* Procedural colors (disabled while a preset is selected) */}
+            <div className={activePreset ? 'space-y-4 opacity-40 pointer-events-none select-none' : 'space-y-4'}>
             {/* Skin Tone */}
             <div>
               <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Skin Tone</span>
@@ -303,12 +409,17 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                 ))}
               </div>
             </div>
+            </div>
           </div>
         </div>
 
         {/* Footer */}
         <div className="p-4 border-t-2 border-rpg-line flex justify-between items-center">
-          <p className="text-[11px] text-rpg-dim">Sprites are generated procedurally on 32x32 canvas</p>
+          <p className="text-[11px] text-rpg-dim">
+            {activePreset
+              ? `${activePreset.name} · synced to other players`
+              : 'Custom sprites are generated procedurally on a 32x32 canvas'}
+          </p>
           <div className="flex gap-2">
             <button
               onClick={onClose}

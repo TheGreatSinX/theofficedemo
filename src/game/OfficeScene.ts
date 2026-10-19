@@ -29,6 +29,13 @@ import {
   MapLayerData,
 } from '../types/game';
 import { sounds } from './soundEffects';
+import {
+  CHARACTER_FEET_MARGIN,
+  CHARACTER_PRESETS,
+  characterPresetTextureKey,
+  getCharacterPreset,
+} from './characterPresets';
+import type { CharacterPreset } from './characterPresets';
 import { RemotePlayerManager } from '../multiplayer/RemotePlayerManager';
 import { PlayerNetState } from '../multiplayer/protocol';
 import { assetRegistry } from '../services/AssetRegistry';
@@ -298,12 +305,13 @@ export class OfficeScene extends Phaser.Scene {
 
     this.registerPlaceholderTextures();
 
-    // Generate player spritesheet
-    this.registerAvatarSpritesheet('player_avatar', this.playerProfile.avatarConfig);
-
-    // Generate mock users spritesheets
-    this.otherUsers.forEach((user) => {
-      this.registerAvatarSpritesheet(`avatar_${user.id}`, user.avatarConfig);
+    // Preload the hand-drawn character cast so avatar sheets can be sliced
+    // synchronously when create() runs (after this loader completes).
+    CHARACTER_PRESETS.forEach((preset) => {
+      const presetKey = characterPresetTextureKey(preset.id);
+      if (!this.textures.exists(presetKey)) {
+        this.load.image(presetKey, preset.image);
+      }
     });
   }
 
@@ -346,40 +354,17 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
-  private registerAvatarSpritesheet(key: string, config: AvatarConfig) {
-    if (!this.textures || !this.anims) return;
-    const canvas = generateAvatarSpritesheet(config);
+  private removeAvatarAnimations(key: string) {
+    const dirs = ['down', 'left', 'right', 'up'];
+    dirs.forEach((dir) => {
+      const walkKey = `${key}_walk_${dir}`;
+      if (this.anims.exists(walkKey)) this.anims.remove(walkKey);
+      const idleKey = `${key}_idle_${dir}`;
+      if (this.anims.exists(idleKey)) this.anims.remove(idleKey);
+    });
+  }
 
-    if (this.textures.exists(key)) {
-      const existing = this.textures.get(key) as Phaser.Textures.CanvasTexture;
-      if (existing && typeof existing.getContext === 'function') {
-        const ctx = existing.getContext();
-        ctx.clearRect(0, 0, existing.width, existing.height);
-        ctx.drawImage(canvas, 0, 0);
-        existing.refresh();
-        return;
-      }
-
-      const dirs = ['down', 'left', 'right', 'up'];
-      dirs.forEach((dir) => {
-        const walkKey = `${key}_walk_${dir}`;
-        if (this.anims.exists(walkKey)) this.anims.remove(walkKey);
-        const idleKey = `${key}_idle_${dir}`;
-        if (this.anims.exists(idleKey)) this.anims.remove(idleKey);
-      });
-      this.textures.remove(key);
-    }
-
-    const texture = this.textures.addCanvas(key, canvas);
-    if (texture) {
-      for (let row = 0; row < 4; row++) {
-        for (let col = 0; col < 3; col++) {
-          const frameIndex = row * 3 + col;
-          texture.add(frameIndex, 0, col * 32, row * 32, 32, 32);
-        }
-      }
-    }
-
+  private createAvatarAnimations(key: string) {
     const anims = this.anims;
     const dirs: { name: string; row: number }[] = [
       { name: 'down', row: 0 },
@@ -405,6 +390,106 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Registers a hand-drawn preset sheet: an image texture sliced into the
+   * RPG Maker frame grid. Returns false when the source image is not loaded so
+   * the caller can fall back to the procedural avatar.
+   */
+  private registerPresetSpritesheet(key: string, preset: CharacterPreset): boolean {
+    const presetKey = characterPresetTextureKey(preset.id);
+    if (!this.textures.exists(presetKey)) return false;
+    const source = this.textures.get(presetKey).getSourceImage();
+    if (!source) return false;
+
+    this.removeAvatarAnimations(key);
+    if (this.textures.exists(key)) {
+      this.textures.remove(key);
+    }
+
+    const texture = this.textures.addImage(key, source as HTMLImageElement);
+    if (!texture) return false;
+
+    // The cast art is high resolution shown far below native size. Linear
+    // filtering keeps the downscale soft instead of shimmering like nearest.
+    texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+
+    const { frameWidth, frameHeight } = preset;
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 3; col++) {
+        texture.add(row * 3 + col, 0, col * frameWidth, row * frameHeight, frameWidth, frameHeight);
+      }
+    }
+
+    this.createAvatarAnimations(key);
+    return true;
+  }
+
+  private registerAvatarSpritesheet(key: string, config: AvatarConfig) {
+    if (!this.textures || !this.anims) return;
+
+    const preset = getCharacterPreset(config.characterId);
+    if (preset && this.registerPresetSpritesheet(key, preset)) {
+      return;
+    }
+
+    const canvas = generateAvatarSpritesheet(config);
+
+    if (this.textures.exists(key)) {
+      const existing = this.textures.get(key) as Phaser.Textures.CanvasTexture;
+      if (existing && typeof existing.getContext === 'function') {
+        const ctx = existing.getContext();
+        ctx.clearRect(0, 0, existing.width, existing.height);
+        ctx.drawImage(canvas, 0, 0);
+        existing.refresh();
+        return;
+      }
+
+      this.removeAvatarAnimations(key);
+      this.textures.remove(key);
+    }
+
+    const texture = this.textures.addCanvas(key, canvas);
+    if (texture) {
+      for (let row = 0; row < 4; row++) {
+        for (let col = 0; col < 3; col++) {
+          const frameIndex = row * 3 + col;
+          texture.add(frameIndex, 0, col * 32, row * 32, 32, 32);
+        }
+      }
+    }
+
+    this.createAvatarAnimations(key);
+  }
+
+  /**
+   * Applies display scale and physics body metrics for an avatar.
+   *
+   * Procedural 32x32 avatars keep their classic footprint. Preset art is
+   * 97x153, so it is scaled down to a ~1.4-tile-tall character and the body is
+   * expressed in source pixels (Phaser multiplies it by the sprite scale) so
+   * the collision footprint stays identical to the classic avatars.
+   */
+  private applyAvatarMetrics(sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) {
+    const preset = getCharacterPreset(config.characterId);
+
+    if (preset) {
+      const displayHeight = 44 * this.tileScale;
+      const scale = displayHeight / preset.frameHeight;
+      const bodyWidth = (18 * this.tileScale) / scale;
+      const bodyHeight = (12 * this.tileScale) / scale;
+      const feetY = preset.frameHeight - CHARACTER_FEET_MARGIN;
+
+      sprite.setScale(scale);
+      sprite.setSize(bodyWidth, bodyHeight);
+      sprite.setOffset((preset.frameWidth - bodyWidth) / 2, feetY - bodyHeight);
+      return;
+    }
+
+    sprite.setScale(this.tileScale);
+    sprite.setSize(18 * this.tileScale, 12 * this.tileScale);
+    sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
+  }
+
   create() {
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
@@ -416,6 +501,13 @@ export class OfficeScene extends Phaser.Scene {
       this.interactionKeyE.on('down', () => this.handleInteractionPress());
       this.interactionKeySpace.on('down', () => this.handleInteractionPress());
     }
+
+    // Preset sheets finished loading in preload(); register every avatar
+    // texture before the world (and its sprites) is built.
+    this.registerAvatarSpritesheet('player_avatar', this.playerProfile.avatarConfig);
+    this.otherUsers.forEach((user) => {
+      this.registerAvatarSpritesheet(`avatar_${user.id}`, user.avatarConfig);
+    });
 
     this.buildMapFromCurrentData();
     this.setupPointerEvents();
@@ -486,11 +578,15 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.isReady || !this.textures || !this.anims) return;
     this.registerAvatarSpritesheet('player_avatar', newConfig);
     if (this.player && this.player.active) {
+      this.applyAvatarMetrics(this.player, newConfig);
       this.player.setTexture('player_avatar');
       const idleKey = `player_avatar_idle_${this.playerProfile.direction}`;
       if (this.anims.exists(idleKey)) {
         try {
-          this.player.play(idleKey, true);
+          // The texture and its animations were re-created above; stop first
+          // so Phaser rebinds the animation to the new frames.
+          this.player.anims.stop();
+          this.player.play(idleKey);
         } catch (err) {
           console.warn('Error playing avatar animation:', err);
         }
@@ -784,10 +880,8 @@ export class OfficeScene extends Phaser.Scene {
     const spawnY = (overrideSpawnY !== undefined ? overrideSpawnY : spawn.tileY) * this.tileSize + this.tileSize / 2;
 
     this.player = this.physics.add.sprite(spawnX, spawnY, 'player_avatar');
-    this.player.setScale(this.tileScale);
+    this.applyAvatarMetrics(this.player, this.playerProfile.avatarConfig);
     this.player.setCollideWorldBounds(true);
-    this.player.setSize(18 * this.tileScale, 12 * this.tileScale);
-    this.player.setOffset(7 * this.tileScale, 20 * this.tileScale);
     this.player.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + spawnY + 0.3);
     this.createRagnarokNameplate(this.player, `${this.playerProfile.name} (You)`, '#38bdf8', true);
     this.physics.add.collider(this.player, this.staticWallsGroup);
@@ -798,7 +892,8 @@ export class OfficeScene extends Phaser.Scene {
         this.playerProfile.id,
         (key, cfg) => this.registerAvatarSpritesheet(key, cfg),
         this.staticWallsGroup,
-        this.tileScale
+        this.tileScale,
+        (sprite, cfg) => this.applyAvatarMetrics(sprite, cfg)
       );
     } else {
       this.remotePlayerManager.setLocalUserId(this.playerProfile.id);
@@ -1377,10 +1472,8 @@ export class OfficeScene extends Phaser.Scene {
     const cy = user.y * this.tileSize + this.tileSize / 2;
 
     const sprite = this.physics.add.sprite(cx, cy, key);
-    sprite.setScale(this.tileScale);
+    this.applyAvatarMetrics(sprite, user.avatarConfig);
     sprite.setImmovable(true);
-    sprite.setSize(18 * this.tileScale, 12 * this.tileScale);
-    sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
     sprite.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + cy + 0.25);
     sprite.play(`${key}_idle_${user.direction}`);
 

@@ -293,3 +293,38 @@ surrounding interface chrome so the whole app reads as RPG Maker.
 - **Verification:** `tsc` + `vite build` clean; all 67 automated assertions
   (rules 12, multiplayer 32, maps 8, editor 8, assets 7) still pass; CSS bundle
   shrank (~63 → ~41 kB) because the old slate/indigo utilities were removed.
+
+## 13. Hand-drawn character presets (avatar roster)
+
+The chibi office cast from the raw sheet is now a selectable avatar roster,
+synced to other players through the existing multiplayer `avatarConfig` flow.
+
+- **Import pipeline:** `raw-assets/import/` (zero-dependency C#/PowerShell).
+  It removes the baked checkerboard background with an edge flood fill (plus an
+  anti-aliasing cleanup pass and despeckle), detects the six rows and 16 frame
+  slots per row, harvests each character's front idle/walk, side and back
+  frames, mirrors the side view for the right-facing row, normalizes frame
+  heights and feet baselines, and exports 97×153 frames. Outputs land in
+  `src/assets/characters/char_<id>.png` (3 columns × 4 rows: down/left/right/up).
+- **Roster:** seven complete characters — Office Worker, SOC Analyst,
+  Consultant, Project Manager, DevOps Engineer, Field Engineer, Office Admin.
+  The red-haired staffer in the sheet is frontal-only (no side view), so she was
+  intentionally left out instead of faking a profile animation.
+- **Data model:** `AvatarConfig.characterId?: string` references a preset; the
+  color fields remain stored so switching back to a custom avatar restores the
+  previous look. No Firestore rule or protocol changes were needed — the whole
+  `avatarConfig` map already flows profile → ticket → Durable Object →
+  `RemotePlayerManager`.
+- **Renderer (`OfficeScene`):** preset sheets are preloaded in `preload()` and
+  registered in `create()` (image texture + sliced frames + walk/idle anims).
+  Textures use LINEAR filtering so the high-resolution art downscales cleanly.
+  Preset sprites render ~1.4 tiles tall, with physics metrics expressed in
+  source pixels so the collision footprint matches classic 32×32 avatars;
+  `RemotePlayerManager` now receives the metrics callback and applies it to
+  remote and mock players as well.
+- **Avatar Studio:** a "Character Roster" gallery (thumbnail crops of the
+  down-facing idle frame) sits above the procedural color controls, which dim
+  while a preset is selected. The live preview renders the chosen preset sheet,
+  and the Custom tile clears `characterId`.
+- **Verification:** `tsc`, `vite build` and the full 67-assertion suite pass;
+  `cast_preview.png` was inspected for frame layout, alignment and mirrored rows.
