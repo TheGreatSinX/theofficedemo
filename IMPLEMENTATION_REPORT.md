@@ -250,13 +250,16 @@ Key invariants:
   and local-server Firebase values come from that single file.
   `firebase.json` + `.firebaserc` target the project for rules deploys
   (`npx firebase-tools deploy --only firestore:rules`).
-- **Firebase console steps still required once (not repo):**
-  1. Create the Firestore `(default)` database (region `asia-southeast1`).
-  2. Deploy `firestore.rules` (CLI command above, or paste into Firestore →
-     Rules in the console).
-  3. Authentication → Sign-in method → enable **Google**.
-  4. Authentication → Settings → Authorized domains → add the deployed
-     `*.workers.dev` origin (`97ee04f1-office.landverseauto.workers.dev`).
+- **Firebase provisioning for `th30ffi3-dem0` (all completed):**
+  1. Firestore `(default)` database — created, region `asia-southeast1`.
+  2. `firestore.rules` — deployed; the `cloud.firestore` release serves the
+     committed ruleset, so unauthenticated reads are rejected (verified via a
+     live anonymous read probe → 403).
+  3. Authentication — initialized with **Google** sign-in enabled (the default
+     email/password config is untouched; the app only surfaces Google).
+  4. Authorized domains — `97ee04f1-office.landverseauto.workers.dev` added
+     alongside `localhost`, `th30ffi3-dem0.firebaseapp.com`, and
+     `th30ffi3-dem0.web.app` (verified via the Auth admin API).
 - Multiplayer works without sign-in (unverified `employee` tickets; admin can
   never be self-asserted). While signed out, the app silently uses local and
   factory data — auth-gated cloud reads are skipped (see §9) — so unsigned
