@@ -90,9 +90,19 @@ class AssetRegistry {
     this.initialized = true;
     this.emit();
 
-    // 2. Cloud metadata (best effort)
+    // 2. Cloud metadata (best effort; guests keep the local mirror only)
+    await this.syncCloudMetadata();
+  }
+
+  /**
+   * Pulls cloud asset metadata into the registry (best effort). No-op while
+   * signed out — the `assets` collection requires authentication to read.
+   * Called on init and again when a signed-in session becomes available.
+   */
+  async syncCloudMetadata(): Promise<void> {
     try {
-      const { db } = await import('./firebase');
+      const { db, isSignedIn } = await import('./firebase');
+      if (!(await isSignedIn())) return;
       const { collection, getDocs } = await import('firebase/firestore');
       const snap = await getDocs(collection(db, 'assets'));
       let changed = false;

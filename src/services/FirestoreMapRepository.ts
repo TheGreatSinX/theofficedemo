@@ -21,7 +21,7 @@ import {
   deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, handleFirestoreError, isSignedIn, OperationType } from './firebase';
 import { MAP_SCHEMA_VERSION, OfficeMapData, StoredMapEnvelope } from '../types/game';
 import { OFFICE_MAP_IDS, getFactoryMap, hasFactoryMap } from '../game/maps/officeMaps';
 import { migrateMapData, serializeMapForStorage, validateMapData } from '../game/maps/mapSchema';
@@ -45,17 +45,20 @@ export class FirestoreMapRepository implements IMapRepository {
   }
 
   async getMap(mapId: string): Promise<OfficeMapData> {
-    try {
-      const snap = await getDoc(doc(db, 'officeMaps', mapId));
-      if (snap.exists()) {
-        const record = snap.data() as StoredOfficeMapRecord;
-        if (record?.mapData) {
-          const { map } = migrateMapData(record.mapData);
-          if (validateMapData(map).valid) return map;
+    // Rules require auth for `officeMaps` reads; guests use local/factory data.
+    if (await isSignedIn()) {
+      try {
+        const snap = await getDoc(doc(db, 'officeMaps', mapId));
+        if (snap.exists()) {
+          const record = snap.data() as StoredOfficeMapRecord;
+          if (record?.mapData) {
+            const { map } = migrateMapData(record.mapData);
+            if (validateMapData(map).valid) return map;
+          }
         }
+      } catch (err) {
+        console.warn(`Firestore getMap failed for ${mapId}, checking fallback...`, err);
       }
-    } catch (err) {
-      console.warn(`Firestore getMap failed for ${mapId}, checking fallback...`, err);
     }
 
     const local = this.readLocalFallback(mapId);
@@ -65,6 +68,7 @@ export class FirestoreMapRepository implements IMapRepository {
   }
 
   async getMapRecord(mapId: string): Promise<StoredOfficeMapRecord | null> {
+    if (!(await isSignedIn())) return null;
     try {
       const snap = await getDoc(doc(db, 'officeMaps', mapId));
       if (snap.exists()) return snap.data() as StoredOfficeMapRecord;
@@ -82,25 +86,7 @@ export class FirestoreMapRepository implements IMapRepository {
       summaries.set(id, summarizeMap(getFactoryMap(id)));
     }
 
-    try {
-      const snap = await getDocs(collection(db, 'officeMaps'));
-      snap.forEach((docSnap) => {
-        const record = docSnap.data() as StoredOfficeMapRecord;
-        if (record?.mapData) {
-          try {
-            const { map } = migrateMapData(record.mapData);
-            summaries.set(map.id, {
-              ...summarizeMap(map),
-              status: record.status,
-              updatedAt: toMillis(record.updatedAt),
-            });
-          } catch {
-            // ignore corrupt documents
-          }
-        }
-      });
-    } catch (err) {
-      console.warn('Firestore listMaps failed, using local + factory maps.', err);
+    const mergeLocalFallbacks = () => {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (!key || !key.startsWith(this.localFallbackPrefix)) continue;
@@ -108,6 +94,33 @@ export class FirestoreMapRepository implements IMapRepository {
         const local = this.readLocalFallback(mapId);
         if (local) summaries.set(mapId, summarizeMap(local));
       }
+    };
+
+    // Rules require auth for `officeMaps` reads; guests list local drafts only.
+    if (await isSignedIn()) {
+      try {
+        const snap = await getDocs(collection(db, 'officeMaps'));
+        snap.forEach((docSnap) => {
+          const record = docSnap.data() as StoredOfficeMapRecord;
+          if (record?.mapData) {
+            try {
+              const { map } = migrateMapData(record.mapData);
+              summaries.set(map.id, {
+                ...summarizeMap(map),
+                status: record.status,
+                updatedAt: toMillis(record.updatedAt),
+              });
+            } catch {
+              // ignore corrupt documents
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('Firestore listMaps failed, using local + factory maps.', err);
+        mergeLocalFallbacks();
+      }
+    } else {
+      mergeLocalFallbacks();
     }
 
     return Array.from(summaries.values()).sort((a, b) => a.name.localeCompare(b.name));

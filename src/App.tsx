@@ -88,6 +88,7 @@ interface ToastState {
 function VirtualOfficeApp() {
   const canvasRef = useRef<OfficeCanvasHandle>(null);
   const { user, profile, isAdmin, updateUserProfile } = useAuth();
+  const signedInUid = user?.uid ?? null;
 
   // -------------------------------------------------------------------------
   // User profile & presence
@@ -415,6 +416,17 @@ function VirtualOfficeApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Re-sync cloud-backed data once a signed-in session is available — either a
+  // fresh sign-in or a restored session that resolves after first paint.
+  useEffect(() => {
+    if (!signedInUid) return;
+    refreshWorlds().catch((err) => console.warn('[App] Failed to refresh worlds after sign-in', err));
+    refreshMapSummaries().catch((err) =>
+      console.warn('[App] Failed to refresh map list after sign-in', err)
+    );
+    void assetRegistry.syncCloudMetadata();
+  }, [signedInUid, refreshWorlds, refreshMapSummaries]);
+
   useEffect(() => {
     let isMounted = true;
     if (!activeWorldId) {
@@ -449,7 +461,10 @@ function VirtualOfficeApp() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [isWeatherModalOpen]);
+    // Re-run when the weather modal opens (config may have changed) and when a
+    // signed-in session becomes available (cloud config is auth-gated).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWeatherModalOpen, signedInUid]);
 
   const weatherVisualState: WeatherVisualState | null = currentWeather
     ? {

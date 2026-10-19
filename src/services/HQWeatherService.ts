@@ -4,7 +4,7 @@
  */
 
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, handleFirestoreError, isSignedIn, OperationType } from './firebase';
 
 export interface HQWeatherConfig {
   location: string;
@@ -49,16 +49,19 @@ class HQWeatherService {
   private configCache: HQWeatherConfig = { ...DEFAULT_HQ_WEATHER_CONFIG };
 
   async getConfig(): Promise<HQWeatherConfig> {
-    const configDocRef = doc(db, 'platformConfig', 'hqWeather');
-    try {
-      const snap = await getDoc(configDocRef);
-      if (snap.exists()) {
-        const data = snap.data() as HQWeatherConfig;
-        this.configCache = { ...DEFAULT_HQ_WEATHER_CONFIG, ...data };
-        return this.configCache;
+    // Rules require auth for `platformConfig` reads; guests use cache/defaults.
+    if (await isSignedIn()) {
+      const configDocRef = doc(db, 'platformConfig', 'hqWeather');
+      try {
+        const snap = await getDoc(configDocRef);
+        if (snap.exists()) {
+          const data = snap.data() as HQWeatherConfig;
+          this.configCache = { ...DEFAULT_HQ_WEATHER_CONFIG, ...data };
+          return this.configCache;
+        }
+      } catch (err) {
+        console.warn('Failed to fetch hqWeather config from Firestore, using cache/defaults:', err);
       }
-    } catch (err) {
-      console.warn('Failed to fetch hqWeather config from Firestore, using cache/defaults:', err);
     }
     return this.configCache;
   }

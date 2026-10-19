@@ -10,7 +10,7 @@
  */
 
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, handleFirestoreError, isSignedIn, OperationType } from './firebase';
 import { WORLD_SCHEMA_VERSION, WorldData, WorldMapEntry } from '../types/game';
 
 const LOCAL_KEY = 'gathergrid_worlds_v1';
@@ -77,36 +77,42 @@ export class WorldRepository {
       });
     }
 
-    try {
-      const snap = await getDocs(collection(db, 'worlds'));
-      snap.forEach((docSnap) => {
-        const world = docSnap.data() as WorldData;
-        if (!world?.id) return;
-        summaries.set(world.id, {
-          id: world.id,
-          name: world.name,
-          mapCount: world.maps?.length ?? 0,
-          updatedAt: toMillis(world.updatedAt),
-          isLocal: false,
+    // Rules require auth for `worlds` reads; guests use the local mirror only.
+    if (await isSignedIn()) {
+      try {
+        const snap = await getDocs(collection(db, 'worlds'));
+        snap.forEach((docSnap) => {
+          const world = docSnap.data() as WorldData;
+          if (!world?.id) return;
+          summaries.set(world.id, {
+            id: world.id,
+            name: world.name,
+            mapCount: world.maps?.length ?? 0,
+            updatedAt: toMillis(world.updatedAt),
+            isLocal: false,
+          });
         });
-      });
-    } catch (err) {
-      console.warn('[WorldRepository] Cloud list failed; using local mirror.', err);
+      } catch (err) {
+        console.warn('[WorldRepository] Cloud list failed; using local mirror.', err);
+      }
     }
 
     return Array.from(summaries.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getWorld(worldId: string): Promise<WorldData | null> {
-    try {
-      const snap = await getDoc(doc(db, 'worlds', worldId));
-      if (snap.exists()) {
-        const world = snap.data() as WorldData;
-        this.upsertLocal(world);
-        return world;
+    // Rules require auth for `worlds` reads; guests use the local mirror only.
+    if (await isSignedIn()) {
+      try {
+        const snap = await getDoc(doc(db, 'worlds', worldId));
+        if (snap.exists()) {
+          const world = snap.data() as WorldData;
+          this.upsertLocal(world);
+          return world;
+        }
+      } catch (err) {
+        console.warn(`[WorldRepository] getWorld(${worldId}) failed; trying local.`, err);
       }
-    } catch (err) {
-      console.warn(`[WorldRepository] getWorld(${worldId}) failed; trying local.`, err);
     }
     return this.readLocal().find((w) => w.id === worldId) ?? null;
   }

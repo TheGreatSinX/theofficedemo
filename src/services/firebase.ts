@@ -72,3 +72,18 @@ export async function testFirestoreConnection(): Promise<boolean> {
     return true;
   }
 }
+
+/**
+ * Waits for the initial auth state, then reports whether a Firebase session is
+ * active. Every collection this app reads requires authentication in the
+ * Firestore rules, so signed-out callers can skip doomed queries and fall back
+ * to local data silently instead of logging permission errors.
+ */
+export async function isSignedIn(): Promise<boolean> {
+  try {
+    await auth.authStateReady();
+  } catch {
+    // Fall through — auth.currentUser still reflects the best-known state.
+  }
+  return auth.currentUser !== null;
+}
