@@ -191,6 +191,12 @@ Key invariants:
 - Install with `npm install --legacy-peer-deps` (upstream peer conflict).
 - Firestore app keeps working without cloud config: local IndexedDB /
   localStorage fallbacks; import/export JSON preserves portability.
+- Cloud reads are auth-gated by design: every collection requires sign-in per
+  `firestore.rules`, so the repositories await `auth.authStateReady()` and skip
+  Firestore queries entirely while signed out (silent local/factory fallback —
+  no permission-error console noise). When a session becomes available (fresh
+  Google sign-in or a restored session resolving after first paint), worlds,
+  map list, weather config and asset metadata re-sync automatically.
 - Deleted obsolete `MapEditorToolbar.tsx` and the legacy `EditorSettings`
   type — no dangling references remain.
 
