@@ -14,6 +14,7 @@ import {
   LogOut,
   CloudSun,
   Shield,
+  Users,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -36,6 +37,8 @@ interface NavbarProps {
   currentWeather: CurrentWeatherState | null;
   connectionState?: ConnectionState;
   pingMs?: number;
+  isDirectoryOpen?: boolean;
+  onToggleDirectory?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -52,6 +55,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentWeather,
   connectionState = 'connected',
   pingMs = 0,
+  isDirectoryOpen = true,
+  onToggleDirectory,
 }) => {
   const { user, profile, isAdmin, signOut } = useAuth();
 
@@ -143,6 +148,26 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Zone 3: Primary Action & Controls */}
       <div className="flex items-center gap-2.5 shrink-0">
+        {/* Colleagues Directory Toggle (world mode; hidden while Studio is open) */}
+        {!isEditorOpen && onToggleDirectory && (
+          <button
+            onClick={onToggleDirectory}
+            aria-expanded={isDirectoryOpen}
+            aria-controls="colleagues-directory"
+            title={isDirectoryOpen ? 'Collapse Colleagues Directory' : 'Expand Colleagues Directory'}
+            className={`relative p-2 rounded-lg transition-colors cursor-pointer ${
+              isDirectoryOpen
+                ? 'bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-indigo-600 border border-slate-900 text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
+              {onlineCount}
+            </span>
+          </button>
+        )}
+
         {/* Audio Mute */}
         <button
           onClick={onToggleMute}

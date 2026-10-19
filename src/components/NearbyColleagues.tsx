@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { UserProfile } from '../types/game';
-import { Users, Video, MessageSquare, Compass } from 'lucide-react';
+import { Users, Video, MessageSquare, Compass, PanelRightClose } from 'lucide-react';
 import { sounds } from '../game/soundEffects';
 
 interface NearbyColleaguesProps {
@@ -15,6 +15,7 @@ interface NearbyColleaguesProps {
   playerTileY: number;
   onTeleportTo: (user: UserProfile) => void;
   onDirectMessage: (user: UserProfile) => void;
+  onCollapse: () => void;
 }
 
 export const NearbyColleagues: React.FC<NearbyColleaguesProps> = ({
@@ -24,6 +25,7 @@ export const NearbyColleagues: React.FC<NearbyColleaguesProps> = ({
   playerTileY,
   onTeleportTo,
   onDirectMessage,
+  onCollapse,
 }) => {
   const getStatusBadge = (status: UserProfile['status']) => {
     switch (status) {
@@ -55,7 +57,17 @@ export const NearbyColleagues: React.FC<NearbyColleaguesProps> = ({
           <Users className="w-4 h-4 text-indigo-400" />
           <h2 className="text-sm font-semibold text-white tracking-wide">Colleagues Directory</h2>
         </div>
-        <span className="text-xs text-slate-400 font-mono tabular-nums">{colleagues.length} online</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 font-mono tabular-nums">{colleagues.length} online</span>
+          <button
+            onClick={onCollapse}
+            title="Collapse Colleagues Directory"
+            aria-label="Collapse Colleagues Directory"
+            className="p-1.5 rounded-md bg-slate-800/70 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+          >
+            <PanelRightClose className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Directory List */}

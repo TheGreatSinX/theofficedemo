@@ -155,7 +155,14 @@ function VirtualOfficeApp() {
   const [isMuted, setIsMuted] = useState(false);
   const [speedBoostTimeLeft, setSpeedBoostTimeLeft] = useState(0);
   const [selectedDirectUser, setSelectedDirectUser] = useState<UserProfile | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem('gathergrid_directory_open');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
   const [isAssetManagerOpen, setIsAssetManagerOpen] = useState(false);
   const [isWorldManagerOpen, setIsWorldManagerOpen] = useState(false);
   const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
@@ -711,6 +718,19 @@ function VirtualOfficeApp() {
     sounds.setMuted(nextMuted);
   }, [isMuted]);
 
+  const handleToggleDirectory = useCallback(() => {
+    sounds.playInteract();
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('gathergrid_directory_open', String(next));
+      } catch {
+        // Storage unavailable (private browsing) — collapse state is session-only.
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (speedBoostTimeLeft <= 0) return;
     const timer = setInterval(() => {
@@ -1222,6 +1242,8 @@ function VirtualOfficeApp() {
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
         onlineCount={colleagues.length + 1}
+        isDirectoryOpen={isSidebarOpen}
+        onToggleDirectory={handleToggleDirectory}
         isEditorOpen={isStudioMode}
         onToggleEditor={toggleStudio}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
@@ -1397,7 +1419,10 @@ function VirtualOfficeApp() {
 
         {/* Colleagues Directory Sidebar (world mode only) */}
         {!isStudioMode && (
-          <div className={`transition-all duration-200 shrink-0 ${isSidebarOpen ? 'w-80' : 'w-0 overflow-hidden'}`}>
+          <div
+            id="colleagues-directory"
+            className={`transition-all duration-200 shrink-0 ${isSidebarOpen ? 'w-80' : 'w-0 overflow-hidden'}`}
+          >
             <NearbyColleagues
               colleagues={colleagues}
               currentMapId={currentMapId}
@@ -1405,6 +1430,7 @@ function VirtualOfficeApp() {
               playerTileY={playerCoords.tileY}
               onTeleportTo={handleTeleportTo}
               onDirectMessage={(colleague) => setSelectedDirectUser(colleague)}
+              onCollapse={handleToggleDirectory}
             />
           </div>
         )}
