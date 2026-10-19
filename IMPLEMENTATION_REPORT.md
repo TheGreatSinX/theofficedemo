@@ -245,11 +245,19 @@ Key invariants:
   canonical + mismatch flows, the movement round-trip, heartbeat/pong,
   reactions, and disconnect broadcasts. `npx wrangler deploy --dry-run` also
   verified (75 KiB bundle, both bindings resolved).
-- **Firebase-side steps (console, not repo):** multiplayer works without
-  sign-in (unverified `employee` tickets; admin can never be self-asserted).
-  For verified identities and roles, sign-in must be allowed on the deployed
-  origin: Firebase Console → Authentication → Settings → Authorized domains →
-  add the `*.workers.dev` domain. Until then the app logs Firestore
-  "Missing or insufficient permissions" (rules correctly require
-  `request.auth != null` — see `firestore.rules`) and falls back to local
-  data.
+- **Firebase project: `th30ffi3-dem0`** (migrated from the AI Studio project;
+  see `firebase-applet-config.json` for the web config). All client, worker,
+  and local-server Firebase values come from that single file.
+  `firebase.json` + `.firebaserc` target the project for rules deploys
+  (`npx firebase-tools deploy --only firestore:rules`).
+- **Firebase console steps still required once (not repo):**
+  1. Create the Firestore `(default)` database (region `asia-southeast1`).
+  2. Deploy `firestore.rules` (CLI command above, or paste into Firestore →
+     Rules in the console).
+  3. Authentication → Sign-in method → enable **Google**.
+  4. Authentication → Settings → Authorized domains → add the deployed
+     `*.workers.dev` origin (`97ee04f1-office.landverseauto.workers.dev`).
+- Multiplayer works without sign-in (unverified `employee` tickets; admin can
+  never be self-asserted). While signed out, the app silently uses local and
+  factory data — auth-gated cloud reads are skipped (see §9) — so unsigned
+  guests never surface Firestore permission errors.
