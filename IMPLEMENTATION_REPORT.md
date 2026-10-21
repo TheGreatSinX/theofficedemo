@@ -322,6 +322,11 @@ synced to other players through the existing multiplayer `avatarConfig` flow.
   source pixels so the collision footprint matches classic 32×32 avatars;
   `RemotePlayerManager` now receives the metrics callback and applies it to
   remote and mock players as well.
+- **Walk cycle:** every preset uses the same 3-frame, 8 fps ping-pong walk as
+  the SOC Analyst (down/left/right/up, idle on the middle column). The source
+  art already supplied multiple step drawings for six characters; Office Admin
+  had only one side/back drawing, so the importer now bakes a subtle step bob
+  into those two rows. No direction slides while frozen.
 - **Avatar Studio:** a "Character Roster" gallery (thumbnail crops of the
   down-facing idle frame) sits above the procedural color controls, which dim
   while a preset is selected. The live preview renders the chosen preset sheet,

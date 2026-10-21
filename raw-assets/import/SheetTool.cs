@@ -409,6 +409,10 @@ public static class SheetTool
 
         // pass 1: collect all refs
         List<List<FrameRef>[]> perChar = new List<List<FrameRef>[]>();
+        // A direction whose three refs point at the same source frame has no
+        // step art. The compose pass below bakes a small bob into those cells
+        // so every preset still animates instead of sliding while frozen.
+        List<bool[]> generatedGait = new List<bool[]>();
         foreach (string[] def in defs)
         {
             int start = int.Parse(def[1]); int n = int.Parse(def[2]);
@@ -460,6 +464,14 @@ public static class SheetTool
             List<FrameRef>[] dirs = new List<FrameRef>[4];
             dirs[0] = down; dirs[1] = left; dirs[2] = left; dirs[3] = up; // index 2 mirrors left at compose time
             perChar.Add(dirs);
+
+            bool[] staticDirs = new bool[4];
+            for (int d = 0; d < 4; d++)
+            {
+                staticDirs[d] = dirs[d][0].Row == dirs[d][1].Row && dirs[d][0].Slot == dirs[d][1].Slot
+                             && dirs[d][1].Row == dirs[d][2].Row && dirs[d][1].Slot == dirs[d][2].Slot;
+            }
+            generatedGait.Add(staticDirs);
         }
 
         // extract all frames (updates cache)
@@ -521,8 +533,17 @@ public static class SheetTool
                         if (e.W == 0) continue;
                         int sw = (int)Math.Round(e.W * e.Scale);
                         int sh = (int)Math.Round(e.H * e.Scale);
-                        int dx = col * cellW + (cellW - sw) / 2;
-                        int dy = dir * cellH + (cellH - 6 - sh);
+                        // Generated gait: keep the middle cell planted and bob the
+                        // two step cells up with a slight lean. Mirror the lean on
+                        // the right-facing row so it follows the body direction.
+                        int offX = 0, offY = 0;
+                        if (generatedGait[ci][dir])
+                        {
+                            offY = (col == 1) ? 0 : -4;
+                            offX = (col == 0 ? -3 : (col == 2 ? 3 : 0)) * (dir == 2 ? -1 : 1);
+                        }
+                        int dx = col * cellW + (cellW - sw) / 2 + offX;
+                        int dy = dir * cellH + (cellH - 6 - sh) + offY;
                         Bitmap src = (dir == 2) ? Mirror(e.Bmp) : e.Bmp;
                         g.DrawImage(src, new Rectangle(dx, dy, sw, sh), 0, 0, e.W, e.H, GraphicsUnit.Pixel);
                         if (dir == 2) src.Dispose();
@@ -537,7 +558,7 @@ public static class SheetTool
                 Math.Round(dirs[0][0] != null ? get(dirs[0][0].Row, dirs[0][0].Slot).Scale : 1, 2) + "]");
             for (int dir = 0; dir < 4; dir++)
             {
-                string line = "    dir" + dir + ":";
+                string line = "    dir" + dir + (generatedGait[ci][dir] ? " [generated gait]" : "") + ":";
                 for (int col = 0; col < 3; col++)
                 {
                     FrameRef f2 = dirs[dir][col];

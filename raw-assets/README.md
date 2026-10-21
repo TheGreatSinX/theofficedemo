@@ -21,7 +21,10 @@ importer (Windows, System.Drawing). It:
 3. harvests each character's frames across the rows (front idle, front walk,
    side-left, backs), mirrors side-left for side-right, and normalizes frame
    heights and feet baselines;
-4. writes `out/export/char_<id>.png` — 97×153 frames, 3×4 RPG Maker layout —
+4. if a direction only has a single drawing (Office Admin's side and back
+   rows), bakes a small step bob into the two outer cells so the preset still
+   animates instead of sliding while frozen;
+5. writes `out/export/char_<id>.png` — 97×153 frames, 3×4 RPG Maker layout —
    plus `out/export/cast_preview.png` for a quick visual check.
 
 ```powershell
