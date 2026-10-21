@@ -19,8 +19,8 @@ importer (Windows, System.Drawing). It:
    plus an anti-aliasing cleanup pass and despeckle;
 2. finds the six character rows and the 16 frame boxes per row;
 3. harvests each character's frames across the rows (front idle, front walk,
-   side-left, backs), mirrors side-left for side-right, and normalizes frame
-   heights and feet baselines;
+   side, backs), uses the right-facing side art for the right row and mirrors
+   it for the left row, and normalizes frame heights and feet baselines;
 4. if a direction only has a single drawing (Office Admin's side and back
    rows), bakes a small step bob into the two outer cells so the preset still
    animates instead of sliding while frozen;

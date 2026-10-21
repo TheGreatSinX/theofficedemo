@@ -396,7 +396,7 @@ public static class SheetTool
         };
 
         // character definitions: slotStart (0-based), slotCount, upRow, upStart, upCount
-        // rows (0-based): 0=front idle, 1=front walk, 2=side left, 3=backs mixed, 4=variants, 5=backs clean
+        // rows (0-based): 0=front idle, 1=front walk, 2=side (faces right), 3=backs mixed, 4=variants, 5=backs clean
         string[][] defs = new string[][] {
             new string[] { "office_worker",    "0",  "3", "",  "",  ""  },
             new string[] { "soc_analyst",      "3",  "3", "",  "",  ""  },
@@ -435,7 +435,8 @@ public static class SheetTool
             {
                 down.Add(new FrameRef(1, start)); down.Add(new FrameRef(0, start)); down.Add(new FrameRef(1, start));
             }
-            // left (right is mirrored at compose time)
+            // left / right: the source side row is drawn facing right, so the
+            // unmirrored art is the right-facing row and the mirror is left.
             if (n >= 3)
             {
                 left.Add(new FrameRef(2, start)); left.Add(new FrameRef(2, start + 1)); left.Add(new FrameRef(2, start + 2));
@@ -462,7 +463,7 @@ public static class SheetTool
                 up.Add(new FrameRef(upRow, upStart)); up.Add(new FrameRef(upRow, upStart)); up.Add(new FrameRef(upRow, upStart));
             }
             List<FrameRef>[] dirs = new List<FrameRef>[4];
-            dirs[0] = down; dirs[1] = left; dirs[2] = left; dirs[3] = up; // index 2 mirrors left at compose time
+            dirs[0] = down; dirs[1] = left; dirs[2] = left; dirs[3] = up; // index 1 mirrors left at compose time
             perChar.Add(dirs);
 
             bool[] staticDirs = new bool[4];
@@ -540,13 +541,13 @@ public static class SheetTool
                         if (generatedGait[ci][dir])
                         {
                             offY = (col == 1) ? 0 : -4;
-                            offX = (col == 0 ? -3 : (col == 2 ? 3 : 0)) * (dir == 2 ? -1 : 1);
+                            offX = (col == 0 ? -3 : (col == 2 ? 3 : 0)) * (dir == 1 ? -1 : 1);
                         }
                         int dx = col * cellW + (cellW - sw) / 2 + offX;
                         int dy = dir * cellH + (cellH - 6 - sh) + offY;
-                        Bitmap src = (dir == 2) ? Mirror(e.Bmp) : e.Bmp;
+                        Bitmap src = (dir == 1) ? Mirror(e.Bmp) : e.Bmp;
                         g.DrawImage(src, new Rectangle(dx, dy, sw, sh), 0, 0, e.W, e.H, GraphicsUnit.Pixel);
-                        if (dir == 2) src.Dispose();
+                        if (dir == 1) src.Dispose();
                     }
                 }
             }

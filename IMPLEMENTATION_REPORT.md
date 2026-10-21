@@ -303,8 +303,9 @@ synced to other players through the existing multiplayer `avatarConfig` flow.
   It removes the baked checkerboard background with an edge flood fill (plus an
   anti-aliasing cleanup pass and despeckle), detects the six rows and 16 frame
   slots per row, harvests each character's front idle/walk, side and back
-  frames, mirrors the side view for the right-facing row, normalizes frame
-  heights and feet baselines, and exports 97×153 frames. Outputs land in
+  frames, uses the right-facing source side art for the right row and mirrors
+  it for the left row, normalizes frame heights and feet baselines, and exports
+  97×153 frames. Outputs land in
   `src/assets/characters/char_<id>.png` (3 columns × 4 rows: down/left/right/up).
 - **Roster:** seven complete characters — Office Worker, SOC Analyst,
   Consultant, Project Manager, DevOps Engineer, Field Engineer, Office Admin.
@@ -323,10 +324,12 @@ synced to other players through the existing multiplayer `avatarConfig` flow.
   `RemotePlayerManager` now receives the metrics callback and applies it to
   remote and mock players as well.
 - **Walk cycle:** every preset uses the same 3-frame, 8 fps ping-pong walk as
-  the SOC Analyst (down/left/right/up, idle on the middle column). The source
-  art already supplied multiple step drawings for six characters; Office Admin
-  had only one side/back drawing, so the importer now bakes a subtle step bob
-  into those two rows. No direction slides while frozen.
+  the SOC Analyst (down/left/right/up, idle on the middle column). The left
+  row is mirrored from the right-facing source art, so the character faces the
+  direction it travels. The source art already supplied multiple step drawings
+  for six characters; Office Admin had only one side/back drawing, so the
+  importer now bakes a subtle step bob into those two rows. No direction slides
+  while frozen.
 - **Avatar Studio:** a "Character Roster" gallery (thumbnail crops of the
   down-facing idle frame) sits above the procedural color controls, which dim
   while a preset is selected. The live preview renders the chosen preset sheet,
