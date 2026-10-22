@@ -42,6 +42,7 @@ import type { CharacterPreset } from './characterPresets';
 import { RemotePlayerManager } from '../multiplayer/RemotePlayerManager';
 import { PlayerNetState } from '../multiplayer/protocol';
 import { assetRegistry } from '../services/AssetRegistry';
+import { OBJECT_SPRITES, getObjectSprite, objectSpriteTextureKey } from './objectSprites';
 import {
   CustomCharacterSheet,
   resolveCustomCharacterSheet,
@@ -57,6 +58,7 @@ import {
 } from './npc';
 import {
   BUILTIN_TEXTURE_KEY_BY_TILE_ID,
+  BUILTIN_OBJECT_FOOTPRINTS,
   findTilesetForTile,
   getCollisionLayer,
   getCollisionMask,
@@ -341,6 +343,14 @@ export class OfficeScene extends Phaser.Scene {
       const sheetKey = characterPresetTextureKey(sheet.id);
       if (!this.textures.exists(sheetKey)) {
         this.load.image(sheetKey, sheet.image);
+      }
+    });
+
+    // Hand-drawn office equipment.
+    OBJECT_SPRITES.forEach((sprite) => {
+      const spriteKey = objectSpriteTextureKey(sprite.id);
+      if (!this.textures.exists(spriteKey)) {
+        this.load.image(spriteKey, sprite.image);
       }
     });
   }
@@ -765,6 +775,14 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   create() {
+    // The imported equipment is high resolution; linear filtering keeps the
+    // downscale soft instead of shimmering.
+    OBJECT_SPRITES.forEach((sprite) => {
+      const key = objectSpriteTextureKey(sprite.id);
+      const texture = this.textures.get(key);
+      if (texture) texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+    });
+
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
       this.input.keyboard.clearCaptures();
@@ -1458,7 +1476,14 @@ export class OfficeScene extends Phaser.Scene {
   // Objects / collision / overlays
   // -------------------------------------------------------------------------
 
-  private resolveObjectTexture(obj: MapObject): { key: string; frame?: number; displayW: number; displayH: number } {
+  private resolveObjectTexture(obj: MapObject): {
+    key: string;
+    frame?: number;
+    displayW: number;
+    displayH: number;
+    /** Anchor the sprite to the bottom of its footprint (furniture). */
+    anchorBottom?: boolean;
+  } {
     const displayW = obj.width * this.tileSize;
     const displayH = obj.height * this.tileSize;
     if (obj.assetId) {
@@ -1469,6 +1494,27 @@ export class OfficeScene extends Phaser.Scene {
       }
       return { key: 'obj_missing', displayW, displayH };
     }
+
+    // Hand-drawn equipment keeps its aspect ratio and stands on the floor.
+    const sprite = getObjectSprite(obj.type);
+    if (sprite) {
+      const key = objectSpriteTextureKey(sprite.id);
+      if (this.textures.exists(key)) {
+        const source = this.textures.get(key).getSourceImage();
+        const sourceW = source?.width ?? 1;
+        const sourceH = source?.height ?? 1;
+        // Furniture fills the height of its footprint and may reach into the
+        // next tile horizontally (a desk is wider than it is deep).
+        const scale = Math.min(displayH / sourceH, (displayW * 2) / sourceW);
+        return {
+          key,
+          displayW: sourceW * scale,
+          displayH: sourceH * scale,
+          anchorBottom: true,
+        };
+      }
+    }
+
     if (this.textures.exists(obj.type)) {
       return { key: obj.type, displayW, displayH };
     }
@@ -1484,9 +1530,15 @@ export class OfficeScene extends Phaser.Scene {
         if (layer && layer.visible === false) continue;
       }
       const resolved = this.resolveObjectTexture(obj);
+      const tileLeft = obj.tileX * this.tileSize;
+      const tileTop = obj.tileY * this.tileSize;
+      const footprintW = obj.width * this.tileSize;
+      const footprintH = obj.height * this.tileSize;
       const img = this.add.image(
-        obj.tileX * this.tileSize + (obj.width * this.tileSize) / 2,
-        obj.tileY * this.tileSize + (obj.height * this.tileSize) / 2,
+        tileLeft + footprintW / 2,
+        resolved.anchorBottom
+          ? tileTop + footprintH - resolved.displayH / 2
+          : tileTop + footprintH / 2,
         resolved.key,
         resolved.frame
       );
@@ -2270,28 +2322,31 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     const id = `obj_${Date.now().toString(36)}_${Math.floor(Math.random() * 0xffff).toString(36)}`;
-    const object: MapObject =
-      ref.kind === 'builtin'
-        ? {
-            id,
-            type: ref.type,
-            tileX: tx,
-            tileY: ty,
-            width: 1,
-            height: 1,
-            isSolid: ref.type !== 'chair_office' && ref.type !== 'door_warp',
-          }
-        : {
-            id,
-            type: 'asset',
-            assetId: ref.assetId,
-            frame: ref.frame,
-            tileX: tx,
-            tileY: ty,
-            width: Math.max(1, ref.widthTiles),
-            height: Math.max(1, ref.heightTiles),
-            isSolid: true,
-          };
+    let object: MapObject;
+    if (ref.kind === 'builtin') {
+      const entry = BUILTIN_OBJECT_FOOTPRINTS.find((o) => o.type === ref.type);
+      object = {
+        id,
+        type: ref.type,
+        tileX: tx,
+        tileY: ty,
+        width: entry?.width ?? 1,
+        height: entry?.height ?? 1,
+        isSolid: entry ? entry.isSolidByDefault : true,
+      };
+    } else {
+      object = {
+        id,
+        type: 'asset',
+        assetId: ref.assetId,
+        frame: ref.frame,
+        tileX: tx,
+        tileY: ty,
+        width: Math.max(1, ref.widthTiles),
+        height: Math.max(1, ref.heightTiles),
+        isSolid: true,
+      };
+    }
 
     applyCommand(this.mapData, { kind: 'object.add', object });
     this.pendingObjectCommands.push(...removed, { kind: 'object.add', object });

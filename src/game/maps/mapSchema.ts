@@ -76,20 +76,16 @@ export interface BuiltinObjectDef {
   isSolidByDefault: boolean;
 }
 
-export const BUILTIN_OBJECTS: BuiltinObjectDef[] = [
-  { type: 'desk_single', label: 'Single Desk', isSolidByDefault: true },
-  { type: 'desk_dual', label: 'Dual Monitor Desk', isSolidByDefault: true },
-  { type: 'chair_office', label: 'Mesh Chair', isSolidByDefault: false },
-  { type: 'table_conference', label: 'Walnut Board Table', isSolidByDefault: true },
-  { type: 'plant_monstera', label: 'Potted Monstera', isSolidByDefault: true },
-  { type: 'water_cooler', label: 'Water Dispenser', isSolidByDefault: true },
-  { type: 'coffee_machine', label: 'Espresso Counter', isSolidByDefault: true },
-  { type: 'whiteboard', label: 'Kanban Whiteboard', isSolidByDefault: true },
-  { type: 'server_rack', label: 'Server Rack', isSolidByDefault: true },
-  { type: 'sofa_lounge', label: 'Lounge Sofa', isSolidByDefault: true },
-  { type: 'phone_booth', label: 'Focus Pod', isSolidByDefault: true },
-  { type: 'door_warp', label: 'Warp Pad', isSolidByDefault: false },
-];
+/**
+ * Object catalog shared by the Studio palette and the renderer.
+ * The definition lives in `src/game/assets/objectIds.ts` so the schema tests
+ * stay free of asset imports.
+ */
+export { BUILTIN_OBJECTS } from '../assets/objectIds';
+import { BUILTIN_OBJECTS as OBJECT_CATALOG } from '../assets/objectIds';
+
+/** Object catalog with the footprint used when the object is placed. */
+export const BUILTIN_OBJECT_FOOTPRINTS = OBJECT_CATALOG;
 
 // ---------------------------------------------------------------------------
 // Grid helpers

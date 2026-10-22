@@ -18,6 +18,15 @@ down / left / right / up, column 0 is the idle pose). The Office Admin sheet
 replaces the roster entry that the cast sheet could only supply with a single
 side and back drawing.
 
+`npc_cast_sheet.jpeg` — ten characters, one per row, twelve frames per row
+(down / side / side / up). Imported with the `npccast` action.
+
+## Office equipment sheets
+
+`office_equipment_sheet.jpeg` and `gaming_desk_sheet.jpeg` — desks, chairs,
+monitors, props, plants, rugs and ten themed gaming workstations. Imported with
+the `equipexport` action (see `src/assets/objects/README.md`).
+
 ## Import pipeline
 
 `import/import.ps1` + `import/SheetTool.cs` — zero-dependency C#/PowerShell
@@ -45,6 +54,8 @@ height with the feet on the 147px baseline.
 cd raw-assets/import
 powershell -ExecutionPolicy Bypass -File import.ps1 -Action grid     # detection boxes
 powershell -ExecutionPolicy Bypass -File import.ps1 -Action export   # final sheets
+powershell -ExecutionPolicy Bypass -File import.ps1 -Action npccast  -Src ..\npc_cast_sheet.jpeg
+powershell -ExecutionPolicy Bypass -File import.ps1 -Action equipexport -Set office -Src ..\office_equipment_sheet.jpeg -Dest ..\..\src\assets\objects
 powershell -ExecutionPolicy Bypass -File import.ps1 -Action sheet34 -Src ..\office_admin_12frame.jpeg -Dest ..\..\src\assets\characters\char_office_admin.png
 ```
 

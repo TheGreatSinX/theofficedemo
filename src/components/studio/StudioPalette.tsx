@@ -11,6 +11,7 @@ import { Palette as PaletteIcon, ChevronDown, ChevronUp, ImagePlus, Plus, Check 
 import { MapTilesetRef, OfficeMapData } from '../../types/game';
 import { StudioEditorSettings, StudioObjectRef } from '../../game/OfficeScene';
 import { BUILTIN_OBJECTS, BUILTIN_TILES } from '../../game/maps/mapSchema';
+import { getObjectSprite } from '../../game/objectSprites';
 import { assetRegistry } from '../../services/AssetRegistry';
 import { AssetCategory } from '../../types/assets';
 
@@ -250,17 +251,29 @@ export const StudioPalette: React.FC<StudioPaletteProps> = ({
                       const selected =
                         settings.selectedObject?.kind === 'builtin' &&
                         settings.selectedObject.type === obj.type;
+                      const art = getObjectSprite(obj.type);
                       return (
                         <button
                           key={obj.type}
                           onClick={() => onSelectObject({ kind: 'builtin', type: obj.type })}
-                          className={`rpg-inset px-2 py-1.5 text-left cursor-pointer ${
+                          className={`rpg-inset px-2 py-1.5 text-left cursor-pointer flex items-center gap-1.5 ${
                             selected ? 'rpg-inset-active' : ''
                           }`}
                         >
-                          <div className="text-[10px] text-rpg-text truncate">{obj.label}</div>
-                          <div className="text-[9px] text-rpg-dim">
-                            {obj.isSolidByDefault ? 'solid' : 'walkable'}
+                          {art ? (
+                            <img
+                              src={art.image}
+                              alt={obj.label}
+                              className="w-7 h-7 object-contain shrink-0"
+                            />
+                          ) : (
+                            <div className="w-7 h-7 shrink-0 rounded bg-rpg-line/60" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-[10px] text-rpg-text truncate">{obj.label}</div>
+                            <div className="text-[9px] text-rpg-dim">
+                              {obj.isSolidByDefault ? 'solid' : 'walkable'}
+                            </div>
                           </div>
                         </button>
                       );

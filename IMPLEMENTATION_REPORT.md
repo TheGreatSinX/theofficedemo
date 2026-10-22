@@ -459,3 +459,35 @@ placeholder texture at its native size (153 px instead of 44 px).
   sprite.
 - Cast ids are typed (`NpcCharacterId`) and the NPC suite checks that every
   catalog entry points at a known cast sheet, so the mistake cannot come back.
+
+## 19. Hand-drawn office equipment
+
+The procedural office furniture is replaced by the imported equipment art.
+
+- **Source:** `raw-assets/office_equipment_sheet.jpeg` (desks, chair, monitors,
+  laptop, keyboard, mouse, lamp, books, mug, plants, headphones, speakers,
+  shelves, framed art, rugs, floor tiles) and `raw-assets/gaming_desk_sheet.jpeg`
+  (ten themed workstations).
+- **Importer:** the new `equipexport` action of `raw-assets/import/SheetTool.cs`
+  masks the checkerboard with a **bounded** two pixel halo (the unbounded pass
+  ate pale items such as rugs and tiles), crops the item rectangles listed in
+  `import.ps1` and writes one transparent PNG per item into
+  `src/assets/objects/`.
+- **Catalogue:** `src/game/assets/objectIds.ts` lists the object types (label,
+  footprint, solidity) and the legacy types that now use the new art
+  (`LEGACY_ART_MAP`: desk_single → desk_simple, desk_dual → desk_drawers,
+  chair_office → chair, table_conference → desk_lshape, plant_monstera →
+  plant_dark), so existing maps keep working. `src/game/objectSprites.ts` binds
+  the art to the ids and is type checked against the id list.
+- **Renderer:** imported equipment fills the height of its footprint and may
+  reach into the next tile horizontally (a desk is wider than it is deep); it
+  is anchored to the bottom of the tile, filtered with LINEAR scaling and
+  stays Y-sorted with the crowd. The Studio palette now shows a thumbnail for
+  every item and can place the new types (monitors, laptops, plants, shelves,
+  rugs, gaming desks …).
+- **Movement check:** the facing logic was re-verified end to end — the NPC
+  direction comes from the dominant axis of the movement delta
+  (`directionFromDelta`), the walk and idle animations follow that direction,
+  the left row of every sheet faces left and the right row faces right (checked
+  on all ten cast characters and all seven roster presets), and the player and
+  remote players use the same key-based lookup.

@@ -22,6 +22,12 @@ import {
   characterPresetTextureKey,
 } from '../src/game/assets/characterKeys';
 import {
+  ART_OBJECTS,
+  BUILTIN_OBJECTS,
+  LEGACY_ART_MAP,
+  LEGACY_OBJECTS,
+} from '../src/game/assets/objectIds';
+import {
   characterCountFor,
   isCharacterSheetAsset,
   resolveCustomCharacterSheet,
@@ -237,6 +243,27 @@ async function runTests() {
     // generated placeholder sprite.
     assert.strictEqual(DEFAULT_CHARACTER_ID, 'office_worker');
     assert.strictEqual(characterPresetTextureKey(DEFAULT_CHARACTER_ID), 'char_preset_office_worker');
+  });
+
+  await test('Test 10: The object catalogue maps legacy types to hand-drawn art', () => {
+    const legacyTypes = LEGACY_OBJECTS.map((o) => o.type);
+    const artTypes = ART_OBJECTS.map((o) => o.type);
+    assert.ok(legacyTypes.length > 0 && artTypes.length > 0);
+
+    // Every art id is unique and every legacy replacement points at real art.
+    assert.strictEqual(new Set(artTypes).size, artTypes.length, 'Art ids must be unique');
+    for (const [legacy, art] of Object.entries(LEGACY_ART_MAP)) {
+      assert.ok(legacyTypes.includes(legacy), `Unknown legacy type "${legacy}"`);
+      assert.ok(artTypes.includes(art), `Legacy type "${legacy}" points at unknown art "${art}"`);
+    }
+
+    // The palette catalogue contains every art id so nothing is unreachable.
+    for (const art of artTypes) {
+      assert.ok(
+        BUILTIN_OBJECTS.some((o) => o.type === art),
+        `Art "${art}" is missing from the builtin object catalogue`
+      );
+    }
   });
 
   console.log('\n============================================================');

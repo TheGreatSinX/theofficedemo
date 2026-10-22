@@ -303,7 +303,451 @@ public static class SheetTool
         return "saved " + outPath;
     }
 
+    /**
+     * Background mask for art that contains large light-coloured items
+     * (rugs, pale tiles, white shelves).
+     *
+     * The relaxed anti-aliasing pass is bounded to a two pixel halo around
+     * the strict checker background, so a big pale item is never eaten by the
+     * background flood.
+     */
+    private static bool[] BuildEquipmentMask(Pix pix, int despeckleMin, out int cleared)
+    {
+        int W = pix.W, H = pix.H;
+        bool[] bg = new bool[W * H];
+
+        Func<int, int, int> grayness = delegate (int x, int y)
+        {
+            int r = pix.R(x, y), g = pix.G(x, y), b = pix.B(x, y);
+            return Math.Max(Math.Abs(r - g), Math.Max(Math.Abs(g - b), Math.Abs(r - b)));
+        };
+        Func<int, int, int> val = delegate (int x, int y)
+        {
+            return (pix.R(x, y) + pix.G(x, y) + pix.B(x, y)) / 3;
+        };
+        Func<int, int, bool> strict = delegate (int x, int y) { return grayness(x, y) <= 10 && val(x, y) >= 220; };
+        Func<int, int, bool> loose = delegate (int x, int y) { return grayness(x, y) <= 16 && val(x, y) >= 190; };
+
+        Queue<int> q = new Queue<int>();
+        for (int x = 0; x < W; x++)
+        {
+            if (strict(x, 0)) { bg[x] = true; q.Enqueue(x); }
+            int i2 = (H - 1) * W + x;
+            if (strict(x, H - 1)) { bg[i2] = true; q.Enqueue(i2); }
+        }
+        for (int y = 0; y < H; y++)
+        {
+            int i1 = y * W;
+            if (strict(0, y)) { bg[i1] = true; q.Enqueue(i1); }
+            int i2 = y * W + (W - 1);
+            if (strict(W - 1, y)) { bg[i2] = true; q.Enqueue(i2); }
+        }
+        while (q.Count > 0)
+        {
+            int i = q.Dequeue();
+            int x = i % W, y = i / W;
+            if (x > 0) { int j = i - 1; if (!bg[j] && strict(x - 1, y)) { bg[j] = true; q.Enqueue(j); } }
+            if (x < W - 1) { int j = i + 1; if (!bg[j] && strict(x + 1, y)) { bg[j] = true; q.Enqueue(j); } }
+            if (y > 0) { int j = i - W; if (!bg[j] && strict(x, y - 1)) { bg[j] = true; q.Enqueue(j); } }
+            if (y < H - 1) { int j = i + W; if (!bg[j] && strict(x, y + 1)) { bg[j] = true; q.Enqueue(j); } }
+        }
+
+        // Bounded halo: dilate the strict background by two pixels and only
+        // drop loose pixels inside that halo.
+        bool[] halo = new bool[W * H];
+        for (int i = 0; i < bg.Length; i++) halo[i] = bg[i];
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool[] next = new bool[W * H];
+            Array.Copy(halo, next, halo.Length);
+            for (int y = 0; y < H; y++)
+            {
+                for (int x = 0; x < W; x++)
+                {
+                    int i = y * W + x;
+                    if (halo[i]) continue;
+                    if ((x > 0 && halo[i - 1]) || (x < W - 1 && halo[i + 1]) ||
+                        (y > 0 && halo[i - W]) || (y < H - 1 && halo[i + W]))
+                        next[i] = true;
+                }
+            }
+            halo = next;
+        }
+        for (int y = 0; y < H; y++)
+        {
+            for (int x = 0; x < W; x++)
+            {
+                int i = y * W + x;
+                if (!bg[i] && halo[i] && loose(x, y)) bg[i] = true;
+            }
+        }
+
+        if (despeckleMin > 0)
+        {
+            // Label the remaining content and clear the small fragments.
+            int[] label = new int[W * H];
+            int comp = 0;
+            List<int> sizes = new List<int>();
+            List<List<int>> members = new List<List<int>>();
+            for (int y = 0; y < H; y++)
+            {
+                for (int x = 0; x < W; x++)
+                {
+                    int idx = y * W + x;
+                    if (bg[idx] || label[idx] != 0) continue;
+                    comp++;
+                    int size = 0;
+                    List<int> mem = new List<int>();
+                    Queue<int> cq = new Queue<int>();
+                    cq.Enqueue(idx); label[idx] = comp;
+                    while (cq.Count > 0)
+                    {
+                        int i = cq.Dequeue();
+                        mem.Add(i); size++;
+                        int cx = i % W, cy = i / W;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0);
+                            int ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                            int j = ny * W + nx;
+                            if (bg[j] || label[j] != 0) continue;
+                            label[j] = comp; cq.Enqueue(j);
+                        }
+                    }
+                    sizes.Add(size);
+                    members.Add(mem);
+                }
+            }
+            for (int ci = 0; ci < comp; ci++)
+            {
+                if (sizes[ci] < despeckleMin)
+                {
+                    foreach (int i in members[ci]) bg[i] = true;
+                }
+            }
+        }
+
+        cleared = 0;
+        for (int i = 0; i < bg.Length; i++) if (bg[i]) cleared++;
+        return bg;
+    }
+
     // =====================  EXPORT  =====================
+
+    /**
+     * Lists the individual items of an equipment sheet (8-connected blobs on
+     * the masked background), grouped into visual rows. Used to build the
+     * crop manifest for `ExportEquipment`.
+     */
+    public static string AnalyzeEquipment(string path)
+    {
+        Pix pix = LoadPix(path);
+        int W = pix.W, H = pix.H;
+        int cleared;
+        bool[] bg = BuildEquipmentMask(pix, 250, out cleared);
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("size " + W + "x" + H + " cleared=" + cleared);
+
+        bool[] seen = new bool[W * H];
+        List<int[]> boxes = new List<int[]>();
+        for (int y = 0; y < H; y++)
+        {
+            for (int x = 0; x < W; x++)
+            {
+                int idx = y * W + x;
+                if (seen[idx] || bg[idx]) continue;
+                Queue<int> q = new Queue<int>();
+                q.Enqueue(idx); seen[idx] = true;
+                int minx = x, maxx = x, miny = y, maxy = y, count = 0;
+                while (q.Count > 0)
+                {
+                    int i = q.Dequeue(); count++;
+                    int cx = i % W, cy = i / W;
+                    if (cx < minx) minx = cx; if (cx > maxx) maxx = cx;
+                    if (cy < miny) miny = cy; if (cy > maxy) maxy = cy;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = cx + dx, ny = cy + dy;
+                            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                            int j = ny * W + nx;
+                            if (seen[j] || bg[j]) continue;
+                            seen[j] = true; q.Enqueue(j);
+                        }
+                }
+                if (count >= 400) boxes.Add(new int[] { minx, miny, maxx, maxy, count });
+            }
+        }
+
+        // Group into rows by vertical overlap.
+        List<int[]> sorted = boxes;
+        sorted.Sort(delegate (int[] a, int[] b) { return a[1] - b[1]; });
+        List<List<int[]>> rows = new List<List<int[]>>();
+        foreach (int[] box in sorted)
+        {
+            List<int[]> row = null;
+            foreach (List<int[]> r in rows)
+            {
+                int[] first = r[0];
+                bool overlaps = box[1] <= first[3] && box[3] >= first[1];
+                if (overlaps) { row = r; break; }
+            }
+            if (row == null) { row = new List<int[]>(); rows.Add(row); }
+            row.Add(box);
+        }
+
+        int rowIndex = 0;
+        foreach (List<int[]> row in rows)
+        {
+            row.Sort(delegate (int[] a, int[] b) { return a[0] - b[0]; });
+            sb.Append("row " + rowIndex + ":");
+            foreach (int[] b in row)
+            {
+                sb.Append(" [" + b[0] + ".." + b[2] + " y" + b[1] + ".." + b[3] + " a" + b[4] + "]");
+            }
+            sb.AppendLine();
+            rowIndex++;
+        }
+        sb.AppendLine("items=" + boxes.Count + " rows=" + rows.Count);
+
+        // Debug image: masked background with the detected bands drawn.
+        using (Bitmap debug = new Bitmap(W, H, PixelFormat.Format32bppArgb))
+        {
+            using (Graphics g = Graphics.FromImage(debug))
+            {
+                for (int y = 0; y < H; y++)
+                {
+                    for (int x = 0; x < W; x++)
+                    {
+                        if (bg[y * W + x]) debug.SetPixel(x, y, Color.FromArgb(255, 255, 0, 255));
+                        else debug.SetPixel(x, y, Color.FromArgb(255, pix.R(x, y), pix.G(x, y), pix.B(x, y)));
+                    }
+                }
+                using (Pen pen = new Pen(Color.Lime, 3))
+                {
+                    int[] rowProfile2 = new int[H];
+                    for (int y = 0; y < H; y++)
+                    {
+                        int c = 0;
+                        for (int x = 0; x < W; x++) if (!bg[y * W + x]) c++;
+                        rowProfile2[y] = c;
+                    }
+                    foreach (int[] rb in Bands(rowProfile2, H, 3, 4))
+                    {
+                        g.DrawLine(pen, 0, rb[0], W, rb[0]);
+                        g.DrawLine(pen, 0, rb[1], W, rb[1]);
+                    }
+                }
+            }
+            debug.Save(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "equipment_mask_debug.png"), ImageFormat.Png);
+        }
+
+        // Projection bands: the regular layout of the sheet.
+        int[] rowProfile = new int[H];
+        for (int y = 0; y < H; y++)
+        {
+            int c = 0;
+            for (int x = 0; x < W; x++) if (!bg[y * W + x]) c++;
+            rowProfile[y] = c;
+        }
+        List<int[]> rowBands = Bands(rowProfile, H, 3, 4);
+        sb.AppendLine("row bands=" + rowBands.Count);
+        for (int i = 0; i < rowBands.Count; i++)
+        {
+            int[] rb = rowBands[i];
+            int[] colProfile = new int[W];
+            for (int y = rb[0]; y <= rb[1]; y++)
+                for (int x = 0; x < W; x++)
+                    if (!bg[y * W + x]) colProfile[x]++;
+            List<int[]> colBands = Bands(colProfile, W, 2, 4);
+            sb.Append("  row " + i + " y" + rb[0] + ".." + rb[1] + " cols=" + colBands.Count + ":");
+            foreach (int[] cb in colBands) sb.Append(" [" + cb[0] + ".." + cb[1] + "]");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    /**
+     * Imports an equipment sheet: every item becomes its own transparent PNG.
+     *
+     * The manifest lists the items with their source rectangle:
+     * `name@x0,y0,x1,y1` (1-based inclusive pixels). The item is cropped
+     * from the masked sheet and written to `outDir` as `<name>.png`.
+     */
+    public static string ExportEquipment(string path, string outDir, string[] manifest)
+    {
+        Pix pix = LoadPix(path);
+        int W = pix.W, H = pix.H;
+        int cleared;
+        bool[] bg = BuildEquipmentMask(pix, 120, out cleared);
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("size " + W + "x" + H + " cleared=" + cleared);
+
+        System.IO.Directory.CreateDirectory(outDir);
+
+        foreach (string entry in manifest)
+        {
+            string[] parts = entry.Split('@');
+            if (parts.Length != 2) continue;
+            string name = parts[0];
+            string[] rect = parts[1].Split(',');
+            if (rect.Length != 4) continue;
+            int x0 = int.Parse(rect[0]), y0 = int.Parse(rect[1]);
+            int x1 = int.Parse(rect[2]), y1 = int.Parse(rect[3]);
+            x0 = Math.Max(0, x0 - 1); y0 = Math.Max(0, y0 - 1);
+            x1 = Math.Min(W - 1, x1 - 1); y1 = Math.Min(H - 1, y1 - 1);
+            if (x1 <= x0 || y1 <= y0) { sb.AppendLine("  " + name + ": EMPTY RECT"); continue; }
+
+            // Trim the transparent margin inside the rectangle.
+            int minx = int.MaxValue, miny = int.MaxValue, maxx = -1, maxy = -1;
+            for (int y = y0; y <= y1; y++)
+                for (int x = x0; x <= x1; x++)
+                    if (!bg[y * W + x])
+                    {
+                        if (x < minx) minx = x; if (x > maxx) maxx = x;
+                        if (y < miny) miny = y; if (y > maxy) maxy = y;
+                    }
+            if (maxx < 0) { sb.AppendLine("  " + name + ": EMPTY"); continue; }
+
+            Bitmap cut = new Bitmap(maxx - minx + 1, maxy - miny + 1, PixelFormat.Format32bppArgb);
+            for (int y = miny; y <= maxy; y++)
+            {
+                for (int x = minx; x <= maxx; x++)
+                {
+                    if (bg[y * W + x]) continue;
+                    cut.SetPixel(x - minx, y - miny, Color.FromArgb(255, pix.R(x, y), pix.G(x, y), pix.B(x, y)));
+                }
+            }
+            string outPath = System.IO.Path.Combine(outDir, name + ".png");
+            cut.Save(outPath, ImageFormat.Png);
+            cut.Dispose();
+            sb.AppendLine("  " + name + ": " + (maxx - minx + 1) + "x" + (maxy - miny + 1) + " -> " + outPath);
+        }
+
+        return sb.ToString();
+    }
+
+    // Detects the n-th visual row of blobs (rows are grouped by overlap).
+    private static int[] DetectRowBand(Pix pix, bool[] bg, int rowIndex)
+    {
+        int W = pix.W, H = pix.H;
+        List<List<int[]>> rows = DetectRows(pix, bg);
+        if (rowIndex < 0 || rowIndex >= rows.Count) return null;
+        List<int[]> row = rows[rowIndex];
+        int minx = int.MaxValue, miny = int.MaxValue, maxx = -1, maxy = -1;
+        foreach (int[] b in row)
+        {
+            if (b[0] < minx) minx = b[0]; if (b[2] > maxx) maxx = b[2];
+            if (b[1] < miny) miny = b[1]; if (b[3] > maxy) maxy = b[3];
+        }
+        return new int[] { minx, miny, maxx, maxy };
+    }
+
+    // Detects the n-th blob column inside a row band.
+    private static int[] DetectColumnBand(Pix pix, bool[] bg, int[] rowBand, int colStart, int colEnd)
+    {
+        if (rowBand == null) return null;
+        int W = pix.W;
+        List<int[]> cols = DetectColumns(pix, bg, rowBand);
+        if (cols.Count == 0) return null;
+
+        // A range (colStart-colEnd) merges several blobs into one item.
+        if (colEnd > colStart)
+        {
+            if (colStart >= cols.Count) return null;
+            int last = Math.Min(colEnd, cols.Count - 1);
+            int minx = int.MaxValue, maxx = -1;
+            for (int i = colStart; i <= last; i++)
+            {
+                if (cols[i][0] < minx) minx = cols[i][0];
+                if (cols[i][1] > maxx) maxx = cols[i][1];
+            }
+            return new int[] { minx, rowBand[1], maxx, rowBand[3] };
+        }
+
+        if (colStart >= cols.Count) return null;
+        int[] c = cols[colStart];
+        return new int[] { c[0], rowBand[1], c[1], rowBand[3] };
+    }
+
+    private static List<List<int[]>> DetectRows(Pix pix, bool[] bg)
+    {
+        int W = pix.W, H = pix.H;
+        bool[] seen = new bool[W * H];
+        List<int[]> boxes = new List<int[]>();
+        for (int y = 0; y < H; y++)
+        {
+            for (int x = 0; x < W; x++)
+            {
+                int idx = y * W + x;
+                if (seen[idx] || bg[idx]) continue;
+                Queue<int> q = new Queue<int>();
+                q.Enqueue(idx); seen[idx] = true;
+                int minx = x, maxx = x, miny = y, maxy = y, count = 0;
+                while (q.Count > 0)
+                {
+                    int i = q.Dequeue(); count++;
+                    int cx = i % W, cy = i / W;
+                    if (cx < minx) minx = cx; if (cx > maxx) maxx = cx;
+                    if (cy < miny) miny = cy; if (cy > maxy) maxy = cy;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = cx + dx, ny = cy + dy;
+                            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                            int j = ny * W + nx;
+                            if (seen[j] || bg[j]) continue;
+                            seen[j] = true; q.Enqueue(j);
+                        }
+                }
+                if (count >= 400) boxes.Add(new int[] { minx, miny, maxx, maxy, count });
+            }
+        }
+        boxes.Sort(delegate (int[] a, int[] b) { return a[1] - b[1]; });
+        List<List<int[]>> rows = new List<List<int[]>>();
+        foreach (int[] box in boxes)
+        {
+            List<int[]> row = null;
+            foreach (List<int[]> r in rows)
+            {
+                int[] first = r[0];
+                if (box[1] <= first[3] && box[3] >= first[1]) { row = r; break; }
+            }
+            if (row == null) { row = new List<int[]>(); rows.Add(row); }
+            row.Add(box);
+        }
+        foreach (List<int[]> r in rows) r.Sort(delegate (int[] a, int[] b) { return a[0] - b[0]; });
+        return rows;
+    }
+
+    // Blobs of one row band, merged when they overlap horizontally.
+    private static List<int[]> DetectColumns(Pix pix, bool[] bg, int[] rowBand)
+    {
+        int W = pix.W;
+        int[] cnt = new int[W];
+        for (int y = rowBand[1]; y <= rowBand[3]; y++)
+            for (int x = 0; x < W; x++)
+                if (!bg[y * W + x]) cnt[x]++;
+
+        List<int[]> bands = new List<int[]>();
+        int i = 0;
+        while (i < W)
+        {
+            if (cnt[i] > 0)
+            {
+                int j = i;
+                while (j < W && cnt[j] > 0) j++;
+                bands.Add(new int[] { i, j - 1 });
+                i = j;
+            }
+            else i++;
+        }
+        return bands;
+    }
 
     /**
      * Imports a horizontal cast sheet: one character per row, 12 frames per
