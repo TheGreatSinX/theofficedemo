@@ -29,6 +29,7 @@ import {
   MapLayerData,
 } from '../types/game';
 import { sounds } from './soundEffects';
+import { chatService } from '../services/ChatService';
 import {
   CHARACTER_FEET_MARGIN,
   CHARACTER_PRESETS,
@@ -43,6 +44,13 @@ import {
   CustomCharacterSheet,
   resolveCustomCharacterSheet,
 } from './assets/customCharacterSheets';
+import {
+  NPC_CATALOG,
+  NPC_TALK_RADIUS_TILES,
+  NpcManager,
+  NpcRuntime,
+  NpcSheetSource,
+} from './npc';
 import {
   BUILTIN_TEXTURE_KEY_BY_TILE_ID,
   findTilesetForTile,
@@ -187,6 +195,10 @@ export class OfficeScene extends Phaser.Scene {
       profile: UserProfile;
     }
   > = new Map();
+
+  /** Ambient cast (see `src/game/npc`). */
+  private npcManager!: NpcManager;
+  private currentNearbyNpc: NpcRuntime | null = null;
 
   // Rendering containers
   private terrainChunks: Map<string, Phaser.GameObjects.RenderTexture> = new Map();
@@ -477,21 +489,83 @@ export class OfficeScene extends Phaser.Scene {
     const preset = getCharacterPreset(config.characterId);
 
     if (preset) {
-      const displayHeight = 44 * this.tileScale;
-      const scale = displayHeight / preset.frameHeight;
-      const bodyWidth = (18 * this.tileScale) / scale;
-      const bodyHeight = (12 * this.tileScale) / scale;
-      const feetY = preset.frameHeight - CHARACTER_FEET_MARGIN;
-
-      sprite.setScale(scale);
-      sprite.setSize(bodyWidth, bodyHeight);
-      sprite.setOffset((preset.frameWidth - bodyWidth) / 2, feetY - bodyHeight);
+      this.applyPresetMetrics(sprite, preset);
       return;
     }
 
     sprite.setScale(this.tileScale);
     sprite.setSize(18 * this.tileScale, 12 * this.tileScale);
     sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
+  }
+
+  /**
+   * Display scale and physics body metrics for a bundled roster preset.
+   * Preset art is 97×153, so it is scaled down to a ~1.4-tile-tall character
+   * and the body is expressed in source pixels (Phaser multiplies it by the
+   * sprite scale) so the collision footprint stays identical to the classic
+   * avatars.
+   */
+  private applyPresetMetrics(sprite: Phaser.Physics.Arcade.Sprite, preset: CharacterPreset) {
+    const displayHeight = 44 * this.tileScale;
+    const scale = displayHeight / preset.frameHeight;
+    const bodyWidth = (18 * this.tileScale) / scale;
+    const bodyHeight = (12 * this.tileScale) / scale;
+    const feetY = preset.frameHeight - CHARACTER_FEET_MARGIN;
+
+    sprite.setScale(scale);
+    sprite.setSize(bodyWidth, bodyHeight);
+    sprite.setOffset((preset.frameWidth - bodyWidth) / 2, feetY - bodyHeight);
+  }
+
+  /**
+   * Binds the sprite sheet of an NPC: a bundled roster preset, a sheet
+   * imported through the asset library, or a procedural avatar. Returns the
+   * texture key that drives the sprite, or null when the sheet is missing.
+   */
+  private async bindNpcSheet(
+    sprite: Phaser.Physics.Arcade.Sprite,
+    key: string,
+    source: NpcSheetSource,
+    direction: Direction
+  ): Promise<string | null> {
+    if (source.kind === 'preset') {
+      const preset = getCharacterPreset(source.id);
+      if (!preset) return null;
+      if (!this.registerPresetSpritesheet(key, preset)) return null;
+      sprite.setTexture(key);
+      this.applyPresetMetrics(sprite, preset);
+      return key;
+    }
+
+    if (source.kind === 'asset') {
+      const config: AvatarConfig = {
+        skinColor: '#f8c291',
+        hairStyle: 'short',
+        hairColor: '#4a3728',
+        shirtColor: '#2563eb',
+        pantsColor: '#1e293b',
+        customCharacterAssetId: source.assetId,
+        customCharacterIndex: source.characterIndex ?? 0,
+      };
+      return this.applyCustomCharacterAvatar(sprite, config, direction);
+    }
+
+    this.registerAvatarSpritesheet(key, source.avatar);
+    sprite.setTexture(key);
+    this.applyAvatarMetrics(sprite, source.avatar);
+    return key;
+  }
+
+  /** Shows the NPC's line in a speech bubble and posts it to the chat. */
+  private handleNpcTalk(npc: NpcRuntime, line: string) {
+    this.showSpeechBubbleForSprite(npc.sprite, line);
+    chatService.sendMessage({
+      senderId: npc.definition.id,
+      senderName: npc.definition.name,
+      channel: 'broadcast',
+      text: line,
+      role: 'employee',
+    });
   }
 
   /**
@@ -617,6 +691,14 @@ export class OfficeScene extends Phaser.Scene {
     this.registerAvatarSpritesheet('player_avatar', this.playerProfile.avatarConfig);
     this.otherUsers.forEach((user) => {
       this.registerAvatarSpritesheet(`avatar_${user.id}`, user.avatarConfig);
+    });
+
+    // Ambient cast (NPCs) — spawned per map in buildMapFromCurrentData().
+    this.npcManager = new NpcManager(this, {
+      getTileSize: () => this.tileSize,
+      depthBase: RemotePlayerManager.ENTITY_DEPTH_BASE,
+      bindSheet: (sprite, key, source, direction) => this.bindNpcSheet(sprite, key, source, direction),
+      onTalk: (npc, line) => this.handleNpcTalk(npc, line),
     });
 
     this.buildMapFromCurrentData();
@@ -1032,6 +1114,12 @@ export class OfficeScene extends Phaser.Scene {
     this.otherUsers
       .filter((u) => u.currentMapId === this.mapData.id)
       .forEach((colleague) => this.spawnColleague(colleague));
+
+    // 7b. Ambient cast (NPCs) for this map
+    if (this.npcManager) {
+      this.npcManager.spawnForMap(this.mapData.id, NPC_CATALOG);
+      this.currentNearbyNpc = null;
+    }
 
     // 8. Camera
     const worldWidth = this.mapData.width * this.tileSize;
@@ -1637,6 +1725,17 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     if (!targetSprite) return;
+
+    this.showSpeechBubbleForSprite(targetSprite, text, durationMs);
+  }
+
+  /** Shows a speech bubble above any sprite (players, colleagues, NPCs). */
+  private showSpeechBubbleForSprite(
+    targetSprite: Phaser.Physics.Arcade.Sprite,
+    text: string,
+    durationMs: number = 4500
+  ) {
+    if (!this.isReady || !targetSprite.active) return;
 
     const container = this.add.container(targetSprite.x, targetSprite.y - 36 * this.tileScale);
     container.setDepth(9100);
@@ -2347,6 +2446,13 @@ export class OfficeScene extends Phaser.Scene {
     }
     if (!this.isControlsEnabled || this.isStudioMode) return;
 
+    // NPCs take priority: talking is the most common interaction.
+    if (this.currentNearbyNpc && this.npcManager) {
+      sounds.playInteract();
+      this.npcManager.talk(this.currentNearbyNpc);
+      return;
+    }
+
     if (this.currentNearbyZone) {
       if (this.currentNearbyZone.type === 'door_warp' && this.currentNearbyZone.warpTarget) {
         this.callbacks.onZoneChange(null);
@@ -2500,6 +2606,9 @@ export class OfficeScene extends Phaser.Scene {
 
     this.checkZoneProximity(this.player.x, this.player.y);
     this.updateMockColleagues(time);
+    if (this.npcManager) {
+      this.npcManager.update(time, delta);
+    }
   }
 
   public syncRemoteSnapshot(players: PlayerNetState[]) {
@@ -2582,11 +2691,37 @@ export class OfficeScene extends Phaser.Scene {
       }
     }
 
-    if (closestZone !== this.currentNearbyZone) {
+    const nearbyNpc = this.npcManager
+      ? this.npcManager.findNearby(playerWorldX, playerWorldY, NPC_TALK_RADIUS_TILES)
+      : null;
+
+    const zoneChanged = closestZone !== this.currentNearbyZone;
+    const npcChanged = nearbyNpc !== this.currentNearbyNpc;
+
+    if (zoneChanged) {
       this.currentNearbyZone = closestZone;
       this.callbacks.onZoneChange(closestZone);
+    }
+    if (npcChanged) {
+      this.currentNearbyNpc = nearbyNpc;
+    }
 
-      if (closestZone && !this.isStudioMode) {
+    if (this.isStudioMode) {
+      this.promptTag.setVisible(false);
+      return;
+    }
+
+    // An NPC in range takes priority over a zone prompt.
+    if (nearbyNpc) {
+      this.promptTag.setVisible(true);
+      this.promptTag.setPosition(nearbyNpc.sprite.x, nearbyNpc.sprite.y - 26 * this.tileScale);
+      const npcText = this.promptTag.list[1] as Phaser.GameObjects.Text;
+      if (npcText) npcText.setText(`Press [E] Talk to ${nearbyNpc.definition.name}`);
+      return;
+    }
+
+    if (zoneChanged || npcChanged) {
+      if (closestZone) {
         this.promptTag.setVisible(true);
         const targetWorldX = (closestZone.tileX + closestZone.width / 2) * this.tileSize;
         const targetWorldY = closestZone.tileY * this.tileSize - 12;

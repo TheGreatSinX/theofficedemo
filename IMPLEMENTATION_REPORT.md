@@ -376,3 +376,26 @@ walk around with it.
   Manager marks usable sheets as "avatar-ready".
 - **Verification:** `tsc`, `vite build` and the suite pass (68 assertions); the
   new asset test covers the 3×4 and 12×8 frame mapping.
+
+## 15. NPC system (`src/game/npc/`)
+
+The office now has an ambient cast: NPCs stand or patrol the floor, use the
+same sprite pipeline as players and can be talked to.
+
+- **Folder layout:** `npcTypes.ts` (model), `npcPathing.ts` (pure movement
+  math), `npcCatalog.ts` (default cast), `NpcManager.ts` (Phaser side) and
+  `index.ts`. Art conventions live in `src/assets/npc/README.md`.
+- **Definitions:** an `NpcDefinition` names the NPC, the map, the spawn tile,
+  the sheet source, the patrol route (tile waypoints that loop), the speed and
+  the dialogue lines. `NpcSheetSource` accepts a bundled roster preset, a
+  sheet imported through the Studio asset library, or a procedural avatar —
+  so uploaded RPG Maker sheets can be used for NPCs too.
+- **Manager:** `NpcManager` spawns the NPCs of the current map, binds their
+  sheet (delegating to the scene so they share the player texture/animation
+  pipeline), walks the patrol route, plays the shared 3-frame walk cycle,
+  Y-sorts with the crowd and renders a hover nameplate.
+- **Interaction:** walking up to an NPC shows "Press [E] Talk to …" and the
+  dialogue line appears in a speech bubble plus the chat drawer.
+- **Verification:** `tsc`, `vite build` and the suite pass (73 assertions);
+  the new NPC suite covers facing, step/arrival math, route building, the
+  dialogue cycle and the catalog.
