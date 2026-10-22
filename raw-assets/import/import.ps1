@@ -186,4 +186,52 @@ switch ($Action) {
     $target = if ($Dest -ne "") { $Dest } else { Join-Path $Out "objects" }
     [SheetTool]::ExportEquipment($Src, $target, $manifest)
   }
+  "extrasexport" {
+    # Office extras sheet: printers, phone, water/coffee, fan, coat rack,
+    # whiteboard, shredder and a meeting table (the equipment art it replaces
+    # is still available, so only the missing pieces are exported here).
+    $extras = @(
+      "printer@207,285,346,455",
+      "printer_fax@386,296,524,447",
+      "phone_desk@563,305,704,451",
+      "paper_tray@749,313,885,444",
+      "wastebasket@943,304,1051,450",
+      "water_dispenser@1137,265,1219,464",
+      "coffee_maker@1304,288,1411,458",
+      "fan_floor@224,499,335,699",
+      "coat_rack@421,503,491,693",
+      "whiteboard_stand@733,519,894,688",
+      "shredder@1115,527,1236,682",
+      "meeting_table@1279,524,1431,685"
+    )
+    $target = if ($Dest -ne "") { $Dest } else { Join-Path $Out "objects" }
+    [SheetTool]::ExportEquipment($Src, $target, $extras)
+  }
+  "itexport" {
+    # IT/server sheet: racks, network gear, camera, access control and UPS.
+    $it = @(
+      "server_racks_dual@41,37,347,281",
+      "network_switch@74,344,295,442",
+      "wifi_router@401,308,570,450",
+      "nas_storage@659,341,837,450",
+      "security_camera@897,316,1060,441",
+      "access_controller@1164,316,1254,450",
+      "fingerprint_scanner@112,497,226,646",
+      "desktop_pc@1094,489,1311,629",
+      "ups_battery@100,697,238,831",
+      "external_drive@342,697,490,822",
+      "ethernet_coil@589,701,757,830",
+      "patch_panel@842,713,1038,815"
+    )
+    $target = if ($Dest -ne "") { $Dest } else { Join-Path $Out "objects" }
+    [SheetTool]::ExportEquipment($Src, $target, $it)
+  }
+  "rackexport" {
+    # Single detailed server cabinet from the dedicated rack sheet.
+    $rack = @(
+      "server_rack_tall@262,180,763,1326"
+    )
+    $target = if ($Dest -ne "") { $Dest } else { Join-Path $Out "objects" }
+    [SheetTool]::ExportEquipment($Src, $target, $rack)
+  }
 }

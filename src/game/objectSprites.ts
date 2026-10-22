@@ -105,6 +105,31 @@ import trophyGoldUrl from '../assets/objects/trophy_gold.png';
 import vaseBlueUrl from '../assets/objects/vase_blue.png';
 import wardrobeSteelUrl from '../assets/objects/wardrobe_steel.png';
 import wardrobeWoodUrl from '../assets/objects/wardrobe_wood.png';
+import accessControllerUrl from '../assets/objects/access_controller.png';
+import coatRackUrl from '../assets/objects/coat_rack.png';
+import coffeeMakerUrl from '../assets/objects/coffee_maker.png';
+import desktopPcUrl from '../assets/objects/desktop_pc.png';
+import ethernetCoilUrl from '../assets/objects/ethernet_coil.png';
+import externalDriveUrl from '../assets/objects/external_drive.png';
+import fanFloorUrl from '../assets/objects/fan_floor.png';
+import fingerprintScannerUrl from '../assets/objects/fingerprint_scanner.png';
+import meetingTableUrl from '../assets/objects/meeting_table.png';
+import nasStorageUrl from '../assets/objects/nas_storage.png';
+import networkSwitchUrl from '../assets/objects/network_switch.png';
+import paperTrayUrl from '../assets/objects/paper_tray.png';
+import patchPanelUrl from '../assets/objects/patch_panel.png';
+import phoneDeskUrl from '../assets/objects/phone_desk.png';
+import printerFaxUrl from '../assets/objects/printer_fax.png';
+import printerUrl from '../assets/objects/printer.png';
+import securityCameraUrl from '../assets/objects/security_camera.png';
+import serverRackTallUrl from '../assets/objects/server_rack_tall.png';
+import serverRacksDualUrl from '../assets/objects/server_racks_dual.png';
+import shredderUrl from '../assets/objects/shredder.png';
+import upsBatteryUrl from '../assets/objects/ups_battery.png';
+import wastebasketUrl from '../assets/objects/wastebasket.png';
+import waterDispenserUrl from '../assets/objects/water_dispenser.png';
+import whiteboardStandUrl from '../assets/objects/whiteboard_stand.png';
+import wifiRouterUrl from '../assets/objects/wifi_router.png';
 
 export interface ObjectSpriteDef {
   /** Art id (also the texture key suffix). */
@@ -145,6 +170,31 @@ const ART_IMAGES: Record<ArtObjectId, string> = {
   shelf: shelfUrl,
   frame: frameUrl,
   rug: rugUrl,
+  printer: printerUrl,
+  printer_fax: printerFaxUrl,
+  phone_desk: phoneDeskUrl,
+  paper_tray: paperTrayUrl,
+  wastebasket: wastebasketUrl,
+  water_dispenser: waterDispenserUrl,
+  coffee_maker: coffeeMakerUrl,
+  fan_floor: fanFloorUrl,
+  coat_rack: coatRackUrl,
+  whiteboard_stand: whiteboardStandUrl,
+  shredder: shredderUrl,
+  meeting_table: meetingTableUrl,
+  server_racks_dual: serverRacksDualUrl,
+  network_switch: networkSwitchUrl,
+  wifi_router: wifiRouterUrl,
+  nas_storage: nasStorageUrl,
+  security_camera: securityCameraUrl,
+  access_controller: accessControllerUrl,
+  fingerprint_scanner: fingerprintScannerUrl,
+  desktop_pc: desktopPcUrl,
+  ups_battery: upsBatteryUrl,
+  external_drive: externalDriveUrl,
+  ethernet_coil: ethernetCoilUrl,
+  patch_panel: patchPanelUrl,
+  server_rack_tall: serverRackTallUrl,
   cabinet_file_low: cabinetFileLowUrl,
   cabinet_file_tall: cabinetFileTallUrl,
   cabinet_lateral: cabinetLateralUrl,

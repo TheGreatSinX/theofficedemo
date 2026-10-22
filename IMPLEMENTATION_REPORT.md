@@ -566,5 +566,44 @@ colour, so every room looked like a dark void around the furniture.
   sofas in front) and the remapped lounge/server props in a real browser; the
   full suite passes with 77 assertions.
 - **Still pending:** wall styles (`Duck-ai-image-2026-10-22-09-36.jpeg`,
-  10 styles with left/face/right pieces and neighbour-aware autotiling) and the
-  IT/server extras (`09-32`, `09-32 (1)`, `09-32 (2)`).
+  10 styles with left/face/right pieces and neighbour-aware autotiling); the
+  IT/server extras were imported in section 22.
+
+## 22. Updated office extras and IT equipment
+
+The last procedural placeholders and the missing office/IT props are replaced
+by the updated art sheets.
+
+- **Sources:** `raw-assets/Duck-ai-image-2026-10-22-09-32.jpeg` (office
+  extras), `Duck-ai-image-2026-10-22-09-32 (1).jpeg` (network and server gear)
+  and `Duck-ai-image-2026-10-22-09-32 (2).jpeg` (a single detailed server
+  cabinet). 25 new transparent PNGs were exported into
+  `src/assets/objects/` by the `extrasexport`, `itexport` and `rackexport`
+  actions of `import.ps1`. Items that already had equivalent art (monitors,
+  keyboards, chairs, the extra printer/shredder variants) were skipped so the
+  palette does not fill with duplicates.
+- **New catalogue types:** 12 office extras (printer, fax/printer, desk phone,
+  paper tray, waste basket, water dispenser, coffee maker, floor fan, coat
+  rack, rolling whiteboard, shredder, meeting table set) and 13 IT pieces
+  (dual server racks, network switch, Wi-Fi router, NAS, security camera,
+  access controller, fingerprint scanner, desktop PC, UPS, external drive,
+  ethernet coil, patch panel, tall server cabinet). The catalogue now lists
+  118 art objects.
+- **Remaining placeholders now use art:** `water_cooler → water_dispenser`,
+  `coffee_machine → coffee_maker`, `whiteboard → whiteboard_stand` and
+  `server_rack → server_rack_tall` were added to `LEGACY_ART_MAP`. Every
+  existing map (breakroom, boardroom, rooftop bar, sprint wall and server
+  room) picks the new art up without data changes.
+- **Footprints:** the water dispenser, coat rack, floor fan and server cabinet
+  use 1×2 so they stand taller than the cast; the dual racks and the meeting
+  table set use 2×2; the rest are 1×1. Desk equipment (network gear, UPS,
+  drives, camera, controllers) is non-solid so it can sit on furniture.
+- **Verified:** contact sheet for all 25 crops, plus an in-game rooftop
+  showcase (since removed) covering every new type and both rack sizes. A
+  boardroom screenshot confirms the new water dispenser and coffee maker in
+  place. The suite still passes with 77 assertions.
+- **Deliberately unchanged:** the already-imported desk/chair/monitor art was
+  not swapped for the sheet's variants, to avoid a mixed-style office in one
+  pass; the boardroom conference table (eight `table_conference` tiles) is a
+  map-layout change, while the new `meeting_table` set is available in the
+  Studio palette.
