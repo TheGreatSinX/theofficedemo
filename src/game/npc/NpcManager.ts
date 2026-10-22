@@ -42,6 +42,11 @@ export interface NpcManagerOptions {
   /** Texture used until the real sheet is bound. */
   placeholderTextureKey?: string;
   /**
+   * Applies the display scale and physics body of the placeholder so an NPC
+   * whose sheet cannot be loaded still has the right size.
+   */
+  applyFallbackMetrics?: (sprite: Phaser.Physics.Arcade.Sprite) => void;
+  /**
    * Registers the sheet for an NPC and returns the texture key that should
    * drive the sprite. `null` keeps the placeholder texture.
    */
@@ -96,6 +101,9 @@ export class NpcManager {
     const placeholder = this.options.placeholderTextureKey ?? PLACEHOLDER_TEXTURE_KEY;
     const sprite = this.scene.physics.add.sprite(worldX, worldY, placeholder);
     sprite.setDepth(this.options.depthBase + worldY + 0.2);
+    // Give the placeholder the right size straight away: a placeholder that
+    // keeps the texture's native scale renders as a giant sprite.
+    this.options.applyFallbackMetrics?.(sprite);
 
     const nameTag = this.createNameTag(definition);
     const runtime: NpcRuntime = {
@@ -132,7 +140,12 @@ export class NpcManager {
       runtime.definition.sheet,
       runtime.direction
     );
-    if (!bound || !runtime.sprite.active) return;
+    if (!bound || !runtime.sprite.active) {
+      // The sheet is unavailable on this device: keep the placeholder but make
+      // sure it is sized like every other character.
+      if (runtime.sprite.active) this.options.applyFallbackMetrics?.(runtime.sprite);
+      return;
+    }
     runtime.textureKey = bound;
     this.playIdle(runtime);
   }

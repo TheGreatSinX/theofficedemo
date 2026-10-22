@@ -12,6 +12,7 @@
  */
 
 import { CharacterPreset } from '../characterPresets';
+import { NpcCharacterId } from '../assets/characterIds';
 import amberUrl from '../../assets/npc/char_npc_amber.png';
 import beanieUrl from '../../assets/npc/char_npc_beanie.png';
 import captainUrl from '../../assets/npc/char_npc_captain.png';
@@ -23,7 +24,12 @@ import sandUrl from '../../assets/npc/char_npc_sand.png';
 import silverUrl from '../../assets/npc/char_npc_silver.png';
 import tealUrl from '../../assets/npc/char_npc_teal.png';
 
-export const NPC_SHEETS: CharacterPreset[] = [
+/** A cast sheet; the id is restricted to the known office cast. */
+export interface NpcSheet extends CharacterPreset {
+  id: NpcCharacterId;
+}
+
+export const NPC_SHEETS: NpcSheet[] = [
   {
     id: 'npc_captain',
     name: 'Navy Cap',
@@ -107,7 +113,7 @@ export const NPC_SHEETS: CharacterPreset[] = [
 ];
 
 /** Returns the cast sheet for an id, if it exists. */
-export function getNpcSheet(id?: string | null): CharacterPreset | undefined {
+export function getNpcSheet(id?: string | null): NpcSheet | undefined {
   if (!id) return undefined;
   return NPC_SHEETS.find((sheet) => sheet.id === id);
 }

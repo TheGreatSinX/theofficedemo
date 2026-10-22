@@ -444,3 +444,18 @@ office now uses a hand-drawn cast imported from a single AI sheet.
   still offers the colour generator for players who want it.
 - **Verification:** `tsc`, `vite build` and the suite pass (74 assertions);
   the new asset test covers the stable texture-key rule.
+
+## 18. Giant NPC fix
+
+The office cast NPCs rendered about four times too large: `bindNpcSheet`
+resolved the sheet with the roster-only lookup, so the cast ids
+(`npc_captain`, …) did not resolve, the binding failed and the NPC kept the
+placeholder texture at its native size (153 px instead of 44 px).
+
+- The binder now uses the shared resolver (roster presets **and** office cast
+  sheets) and applies the texture key it actually registered.
+- Placeholders get their metrics immediately (`applyFallbackMetrics`), so an
+  NPC whose sheet is unavailable is still the right size instead of a giant
+  sprite.
+- Cast ids are typed (`NpcCharacterId`) and the NPC suite checks that every
+  catalog entry points at a known cast sheet, so the mistake cannot come back.

@@ -17,6 +17,7 @@ import {
   stepToward,
 } from '../src/game/npc/npcPathing';
 import { NPC_DEFAULT_SPEED, NPC_TALK_RADIUS_TILES } from '../src/game/npc/npcTypes';
+import { NPC_CHARACTER_IDS } from '../src/game/assets/characterIds';
 
 let passedCount = 0;
 let failedCount = 0;
@@ -103,7 +104,12 @@ async function runTests() {
       assert.ok(Number.isFinite(npc.x) && Number.isFinite(npc.y), 'NPC needs a spawn tile');
       assert.ok(npc.sheet.kind === 'preset' || npc.sheet.kind === 'asset' || npc.sheet.kind === 'procedural');
       if (npc.sheet.kind === 'preset') {
-        assert.ok(npc.sheet.id.length > 0, 'Preset NPCs need a preset id');
+        // The cast sheet must exist, otherwise the NPC keeps the placeholder
+        // texture and renders at the wrong (giant) size.
+        assert.ok(
+          NPC_CHARACTER_IDS.includes(npc.sheet.id as (typeof NPC_CHARACTER_IDS)[number]),
+          `Unknown cast sheet "${npc.sheet.id}" on ${npc.id}`
+        );
       }
       if (npc.waypoints && npc.waypoints.length > 0) {
         assert.ok(npc.speed === undefined || npc.speed > 0, 'NPC speed must be positive');

@@ -589,6 +589,22 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
+   * Metrics for a sprite that has no character sheet yet: the default
+   * hand-drawn character, so placeholders are never rendered at the raw
+   * texture size.
+   */
+  private applyAvatarFallbackMetrics(sprite: Phaser.Physics.Arcade.Sprite) {
+    const fallback = this.resolveCharacterSheet(DEFAULT_AVATAR_CHARACTER_ID);
+    if (fallback) {
+      this.applyPresetMetrics(sprite, fallback);
+      return;
+    }
+    sprite.setScale(this.tileScale);
+    sprite.setSize(18 * this.tileScale, 12 * this.tileScale);
+    sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
+  }
+
+  /**
    * Binds the sprite sheet of an NPC: a bundled roster preset, a sheet
    * imported through the asset library, or a procedural avatar. Returns the
    * texture key that drives the sprite, or null when the sheet is missing.
@@ -600,12 +616,15 @@ export class OfficeScene extends Phaser.Scene {
     direction: Direction
   ): Promise<string | null> {
     if (source.kind === 'preset') {
-      const preset = getCharacterPreset(source.id);
+      // Roster presets *and* the office cast sheets have to resolve here,
+      // otherwise the NPC keeps the placeholder texture and renders giant.
+      const preset = this.resolveCharacterSheet(source.id);
       if (!preset) return null;
-      if (!this.registerPresetSpritesheet(key, preset)) return null;
-      sprite.setTexture(key);
+      const sheetKey = this.registerPresetSpritesheet(key, preset);
+      if (!sheetKey) return null;
+      sprite.setTexture(sheetKey);
       this.applyPresetMetrics(sprite, preset);
-      return key;
+      return sheetKey;
     }
 
     if (source.kind === 'asset') {
@@ -621,10 +640,10 @@ export class OfficeScene extends Phaser.Scene {
       return this.applyCustomCharacterAvatar(sprite, config, direction);
     }
 
-    this.registerAvatarSpritesheet(key, source.avatar);
-    sprite.setTexture(key);
+    const canvasKey = this.registerAvatarSpritesheet(key, source.avatar);
+    sprite.setTexture(canvasKey);
     this.applyAvatarMetrics(sprite, source.avatar);
-    return key;
+    return canvasKey;
   }
 
   /** Shows the NPC's line in a speech bubble and posts it to the chat. */
@@ -769,6 +788,7 @@ export class OfficeScene extends Phaser.Scene {
       getTileSize: () => this.tileSize,
       depthBase: RemotePlayerManager.ENTITY_DEPTH_BASE,
       placeholderTextureKey: this.playerAvatarKey,
+      applyFallbackMetrics: (sprite) => this.applyAvatarFallbackMetrics(sprite),
       bindSheet: (sprite, key, source, direction) => this.bindNpcSheet(sprite, key, source, direction),
       onTalk: (npc, line) => this.handleNpcTalk(npc, line),
     });
