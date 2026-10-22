@@ -139,9 +139,9 @@ export function createMainOfficeMap(): OfficeMapData {
     { id: 'break_chair_2', type: 'chair_office', tileX: 19, tileY: 6, width: 1, height: 1, isSolid: false },
 
     // --- SERVER & DEVOPS ROOM (Bottom Right) ---
-    { id: 'server_1', type: 'server_rack', tileX: 18, tileY: 11, width: 1, height: 1, isSolid: true, interactionZoneId: 'zone_server' },
-    { id: 'server_2', type: 'server_rack', tileX: 20, tileY: 11, width: 1, height: 1, isSolid: true },
-    { id: 'server_3', type: 'server_rack', tileX: 22, tileY: 11, width: 1, height: 1, isSolid: true },
+    { id: 'server_1', type: 'server_rack', tileX: 18, tileY: 10, width: 1, height: 2, isSolid: true, interactionZoneId: 'zone_server' },
+    { id: 'server_2', type: 'server_rack', tileX: 20, tileY: 10, width: 1, height: 2, isSolid: true },
+    { id: 'server_3', type: 'server_rack', tileX: 22, tileY: 10, width: 1, height: 2, isSolid: true },
 
     // --- WARP PADS (Room Transitions) ---
     // Warp to Executive Boardroom Wing (Top Doorway at x=15, y=2)
@@ -150,10 +150,15 @@ export function createMainOfficeMap(): OfficeMapData {
     { id: 'warp_rooftop', type: 'door_warp', tileX: 4, tileY: 15, width: 1, height: 1, isSolid: false, interactionZoneId: 'zone_warp_rooftop' },
   ];
 
-  // Mark solids
+  // Mark solids (the whole footprint of multi-tile objects is blocked)
   for (const obj of objects) {
-    if (obj.isSolid) {
-      solidMask[obj.tileY][obj.tileX] = true;
+    if (!obj.isSolid) continue;
+    for (let dy = 0; dy < obj.height; dy++) {
+      for (let dx = 0; dx < obj.width; dx++) {
+        const x = obj.tileX + dx;
+        const y = obj.tileY + dy;
+        if (x >= 0 && x < width && y >= 0 && y < height) solidMask[y][x] = true;
+      }
     }
   }
 
@@ -346,8 +351,13 @@ export function createBoardroomMap(): OfficeMapData {
   ];
 
   for (const obj of objects) {
-    if (obj.isSolid) {
-      solidMask[obj.tileY][obj.tileX] = true;
+    if (!obj.isSolid) continue;
+    for (let dy = 0; dy < obj.height; dy++) {
+      for (let dx = 0; dx < obj.width; dx++) {
+        const x = obj.tileX + dx;
+        const y = obj.tileY + dy;
+        if (x >= 0 && x < width && y >= 0 && y < height) solidMask[y][x] = true;
+      }
     }
   }
 
@@ -477,8 +487,13 @@ export function createRooftopMap(): OfficeMapData {
   ];
 
   for (const obj of objects) {
-    if (obj.isSolid) {
-      solidMask[obj.tileY][obj.tileX] = true;
+    if (!obj.isSolid) continue;
+    for (let dy = 0; dy < obj.height; dy++) {
+      for (let dx = 0; dx < obj.width; dx++) {
+        const x = obj.tileX + dx;
+        const y = obj.tileY + dy;
+        if (x >= 0 && x < width && y >= 0 && y < height) solidMask[y][x] = true;
+      }
     }
   }
 

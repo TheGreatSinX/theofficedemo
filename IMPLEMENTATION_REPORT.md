@@ -602,6 +602,12 @@ by the updated art sheets.
   showcase (since removed) covering every new type and both rack sizes. A
   boardroom screenshot confirms the new water dispenser and coffee maker in
   place. The suite still passes with 77 assertions.
+- **Server room:** the three factory racks moved up one row (18/20/22, 10) and
+  use a 1×2 footprint, so the detailed cabinet art stands two tiles tall with
+  the interaction zone in front of them. The factory solid-mask pass now
+  blocks the whole footprint of multi-tile objects instead of only the anchor
+  tile. Signed-in players keep their published map until it is reset or
+  republished; guests see the factory layout immediately.
 - **Deliberately unchanged:** the already-imported desk/chair/monitor art was
   not swapped for the sheet's variants, to avoid a mixed-style office in one
   pass; the boardroom conference table (eight `table_conference` tiles) is a
