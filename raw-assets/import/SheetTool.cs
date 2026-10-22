@@ -305,6 +305,165 @@ public static class SheetTool
 
     // =====================  EXPORT  =====================
 
+    /**
+     * Standardizes a standalone 3x4 RPG Maker sheet (one character, 3 columns
+     * x 4 rows) into the 97x153 frames used by the preset registry.
+     *
+     * Source order is assumed to be down / side / side / up, with column 0 as
+     * the idle pose. The first side row is mirrored for LEFT and the second is
+     * used for RIGHT, which also fixes sheets whose two side rows were both
+     * drawn facing right. Background is removed with the same checker/AA mask
+     * as the cast importer; the largest 8-connected component per cell is the
+     * character (baked drop shadows are dropped with the background).
+     */
+    public static string Process34(string path, string outPath)
+    {
+        Pix pix = LoadPix(path);
+        int W = pix.W, H = pix.H;
+        int cleared;
+        bool[] bg = BuildMask(pix, 250, out cleared);
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("size " + W + "x" + H + " cleared=" + cleared);
+
+        int cw = W / 3;
+        int ch = H / 4;
+        Extracted[,] cells = new Extracted[4, 3];
+        List<int> heights = new List<int>();
+        List<int> widths = new List<int>();
+
+        for (int r = 0; r < 4; r++)
+        {
+            for (int c = 0; c < 3; c++)
+            {
+                int xa = c * cw, ya = r * ch;
+                int xb = Math.Min(W, xa + cw), yb = Math.Min(H, ya + ch);
+                int bw = xb - xa, bh = yb - ya;
+                bool[] seen = new bool[bw * bh];
+                int bestSize = 0;
+                int bestMinX = 0, bestMinY = 0, bestMaxX = 0, bestMaxY = 0;
+                bool[] bestMembers = null;
+
+                for (int y = 0; y < bh; y++)
+                {
+                    for (int x = 0; x < bw; x++)
+                    {
+                        int idx = y * bw + x;
+                        if (seen[idx] || bg[(ya + y) * W + (xa + x)]) continue;
+                        seen[idx] = true;
+                        Queue<int> q = new Queue<int>();
+                        List<int> members = new List<int>();
+                        q.Enqueue(idx);
+                        int minx = x, maxx = x, miny = y, maxy = y;
+                        while (q.Count > 0)
+                        {
+                            int i = q.Dequeue();
+                            members.Add(i);
+                            int cx = i % bw, cy = i / bw;
+                            if (cx < minx) minx = cx; if (cx > maxx) maxx = cx;
+                            if (cy < miny) miny = cy; if (cy > maxy) maxy = cy;
+                            for (int dy = -1; dy <= 1; dy++)
+                            {
+                                for (int dx = -1; dx <= 1; dx++)
+                                {
+                                    if (dx == 0 && dy == 0) continue;
+                                    int nx = cx + dx, ny = cy + dy;
+                                    if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue;
+                                    int j = ny * bw + nx;
+                                    if (seen[j] || bg[(ya + ny) * W + (xa + nx)]) continue;
+                                    seen[j] = true;
+                                    q.Enqueue(j);
+                                }
+                            }
+                        }
+                        if (members.Count > bestSize)
+                        {
+                            bestSize = members.Count;
+                            bestMinX = minx; bestMaxX = maxx; bestMinY = miny; bestMaxY = maxy;
+                            bool[] membersMask = new bool[bw * bh];
+                            foreach (int i in members) membersMask[i] = true;
+                            bestMembers = membersMask;
+                        }
+                    }
+                }
+
+                Extracted e = new Extracted();
+                e.Row = r; e.Slot = c;
+                if (bestSize == 0) { e.W = 0; e.H = 0; cells[r, c] = e; continue; }
+                e.X = xa + bestMinX; e.Y = ya + bestMinY;
+                e.W = bestMaxX - bestMinX + 1;
+                e.H = bestMaxY - bestMinY + 1;
+                Bitmap bmp = new Bitmap(e.W, e.H, PixelFormat.Format32bppArgb);
+                for (int y = bestMinY; y <= bestMaxY; y++)
+                {
+                    for (int x = bestMinX; x <= bestMaxX; x++)
+                    {
+                        int mi = y * bw + x;
+                        if (!bestMembers[mi]) continue;
+                        int sx = xa + x, sy = ya + y;
+                        bmp.SetPixel(x - bestMinX, y - bestMinY, Color.FromArgb(255, pix.R(sx, sy), pix.G(sx, sy), pix.B(sx, sy)));
+                    }
+                }
+                e.Bmp = bmp;
+                cells[r, c] = e;
+                heights.Add(e.H);
+                widths.Add(e.W);
+                sb.AppendLine("  r" + r + "c" + c + " bbox=" + e.X + "," + e.Y + " " + e.W + "x" + e.H + " area=" + bestSize);
+            }
+        }
+
+        int[] hs = heights.ToArray();
+        int[] ws = widths.ToArray();
+        Array.Sort(hs);
+        Array.Sort(ws);
+        int medianH = hs[hs.Length / 2];
+        int maxH = hs[hs.Length - 1];
+        int maxW = ws[ws.Length - 1];
+        // Fit the median frame to the same 143px body height as the cast
+        // presets, but never let the tallest/widest pose exceed the cell.
+        double scale = 143.0 / medianH;
+        scale = Math.Min(scale, 145.0 / maxH);
+        scale = Math.Min(scale, 93.0 / maxW);
+        sb.AppendLine("heights=" + string.Join(",", hs) + " widths=" + string.Join(",", ws));
+        sb.AppendLine("medianH=" + medianH + " maxH=" + maxH + " maxW=" + maxW + " scale=" + Math.Round(scale, 3));
+
+        const int FW = 97, FH = 153, FEET = 147;
+        using (Bitmap sheet = new Bitmap(FW * 3, FH * 4, PixelFormat.Format32bppArgb))
+        {
+            using (Graphics g = Graphics.FromImage(sheet))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                // Output rows: 0 down, 1 left, 2 right, 3 up.
+                // The supplied 3x4 sheet already follows that order: its first
+                // side row faces left and its second side row faces right.
+                int[] srcRow = new int[] { 0, 1, 2, 3 };
+                // Columns: step / idle / step. The source puts idle first, so
+                // reorder to the registry's step-idle-step convention.
+                int[] srcCol = new int[] { 1, 0, 2 };
+
+                for (int dir = 0; dir < 4; dir++)
+                {
+                    for (int col = 0; col < 3; col++)
+                    {
+                        Extracted e = cells[srcRow[dir], srcCol[col]];
+                        if (e.W == 0) continue;
+                        int sw = (int)Math.Round(e.W * scale);
+                        int sh = (int)Math.Round(e.H * scale);
+                        if (sh > FEET - 6) { sh = FEET - 6; }
+                        int dx = col * FW + (FW - sw) / 2;
+                        int dy = dir * FH + (FEET - sh);
+                        g.DrawImage(e.Bmp, new Rectangle(dx, dy, sw, sh), 0, 0, e.W, e.H, GraphicsUnit.Pixel);
+                    }
+                }
+            }
+            sheet.Save(outPath, ImageFormat.Png);
+        }
+
+        sb.AppendLine("saved " + outPath);
+        return sb.ToString();
+    }
+
     private class FrameRef
     {
         public int Row; public int Slot;

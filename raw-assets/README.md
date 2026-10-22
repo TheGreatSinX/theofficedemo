@@ -10,6 +10,14 @@ committed under `src/assets/` instead.
 frame slots). Seven complete characters were extracted; the red-haired staffer
 is frontal-only (no side view) and is intentionally not in the roster yet.
 
+## Standalone 12-frame character sheets
+
+`office_admin_12frame.jpeg` and `devops_engineer_12frame.jpeg` — single
+characters drawn as a classic RPG Maker MZ sheet (3 columns × 4 rows:
+down / left / right / up, column 0 is the idle pose). The Office Admin sheet
+replaces the roster entry that the cast sheet could only supply with a single
+side and back drawing.
+
 ## Import pipeline
 
 `import/import.ps1` + `import/SheetTool.cs` — zero-dependency C#/PowerShell
@@ -27,10 +35,17 @@ importer (Windows, System.Drawing). It:
 5. writes `out/export/char_<id>.png` — 97×153 frames, 3×4 RPG Maker layout —
    plus `out/export/cast_preview.png` for a quick visual check.
 
+The `sheet34` action handles a standalone 3×4 sheet instead: it masks the
+background the same way, keeps the largest 8-connected component per cell
+(so baked drop shadows are dropped), reorders the columns to the registry's
+step / idle / step convention and scales every frame to the same 143px body
+height with the feet on the 147px baseline.
+
 ```powershell
 cd raw-assets/import
 powershell -ExecutionPolicy Bypass -File import.ps1 -Action grid     # detection boxes
 powershell -ExecutionPolicy Bypass -File import.ps1 -Action export   # final sheets
+powershell -ExecutionPolicy Bypass -File import.ps1 -Action sheet34 -Src ..\office_admin_12frame.jpeg -Dest ..\..\src\assets\characters\char_office_admin.png
 ```
 
 Copy the exported `char_*.png` files to `src/assets/characters/`; the in-game

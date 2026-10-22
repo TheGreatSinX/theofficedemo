@@ -10,6 +10,7 @@
   Usage:
     powershell -ExecutionPolicy Bypass -File import.ps1 -Action grid
     powershell -ExecutionPolicy Bypass -File import.ps1 -Action export
+    powershell -ExecutionPolicy Bypass -File import.ps1 -Action sheet34 -Src ..\office_admin_12frame.jpeg -Dest ..\..\src\assets\characters\char_office_admin.png
     powershell -ExecutionPolicy Bypass -File import.ps1 -Action crop -X 0 -Y 0 -W 400 -H 200 -Zoom 2
     powershell -ExecutionPolicy Bypass -File import.ps1 -Action maskdebug
 
@@ -29,7 +30,8 @@ param(
   [int]$W = 0,
   [int]$H = 0,
   [int]$Zoom = 1,
-  [string]$Out = (Join-Path $PSScriptRoot "out")
+  [string]$Out = (Join-Path $PSScriptRoot "out"),
+  [string]$Dest = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,4 +45,5 @@ switch ($Action) {
   "maskdebug" { [SheetTool]::MaskDebug($Src, (Join-Path $Out "mask_debug.png")) }
   "grid"      { [SheetTool]::GridDebug($Src, (Join-Path $Out "grid_debug.png")) }
   "export"    { [SheetTool]::Export($Src, (Join-Path $Out "export")) }
+  "sheet34"   { [SheetTool]::Process34($Src, $(if ($Dest -ne "") { $Dest } else { Join-Path $Out "char_34.png" })) }
 }

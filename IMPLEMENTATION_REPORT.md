@@ -330,6 +330,12 @@ synced to other players through the existing multiplayer `avatarConfig` flow.
   for six characters; Office Admin had only one side/back drawing, so the
   importer now bakes a subtle step bob into those two rows. No direction slides
   while frozen.
+- **Office Admin replacement:** the cast sheet had no usable back view for the
+  Office Admin, so the character was re-shot as a classic 3×4 RPG Maker sheet
+  (`raw-assets/office_admin_12frame.jpeg`). The new `sheet34` importer masks
+  the background, drops the baked drop shadow, reorders the columns to
+  step / idle / step and rescales every frame to the same 143px body height,
+  giving the character a real walk cycle in all four directions.
 - **Avatar Studio:** a "Character Roster" gallery (thumbnail crops of the
   down-facing idle frame) sits above the procedural color controls, which dim
   while a preset is selected. The live preview renders the chosen preset sheet,
