@@ -24,6 +24,7 @@ import {
 } from '../src/game/assets/characterKeys';
 import {
   ART_OBJECTS,
+  ART_OBJECT_IDS,
   BUILTIN_OBJECTS,
   LEGACY_ART_MAP,
   LEGACY_OBJECTS,
@@ -266,6 +267,19 @@ async function runTests() {
         BUILTIN_OBJECTS.some((o) => o.type === art),
         `Art "${art}" is missing from the builtin object catalogue`
       );
+    }
+
+    // The art id list and the catalogue must stay in lockstep: an id that is
+    // only in ART_OBJECT_IDS loads a texture but can never be placed.
+    const loadedIds = [...ART_OBJECT_IDS];
+    assert.strictEqual(new Set(loadedIds).size, loadedIds.length, 'Art ids must be unique');
+    assert.strictEqual(
+      loadedIds.length,
+      artTypes.length,
+      'ART_OBJECT_IDS and ART_OBJECTS must list the same number of items'
+    );
+    for (const id of loadedIds) {
+      assert.ok(artTypes.includes(id), `Art "${id}" is missing from ART_OBJECTS`);
     }
   });
 

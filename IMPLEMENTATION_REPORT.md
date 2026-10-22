@@ -523,3 +523,48 @@ colour, so every room looked like a dark void around the furniture.
 - **Coverage:** Main Office (parquet + blue carpet + checker + dark stone),
   Boardroom Wing (carpet + stone) and Rooftop Garden (dark deck + grass) were
   re-checked in a real browser; the minimap picks up the same tile colours.
+
+## 21. Imported props: cabinets, plants/decor and sofas
+
+62 new pieces of hand-drawn furniture extend the equipment catalogue.
+
+- **Sources:** `raw-assets/Duck-ai-image-2026-10-22-09-38.jpeg` (25 cabinets,
+  lockers, shelves, a sink counter and a server rack),
+  `raw-assets/Duck-ai-image-2026-10-22-09-39.jpeg` (24 plants and decor props:
+  planters, framed art, clock, sculpture, vase, globe, calendar, trophy,
+  certificate, corkboard, books, table lamp) and
+  `raw-assets/Duck-ai-image-2026-10-22-09-35 (1).jpeg` (13 seats: loveseats,
+  sofas, a chesterfield, a sectional, a bench and a navy ottoman).
+- **Importer:** the new `propsexport` action of `raw-assets/import/import.ps1`
+  reuses the bounded checkerboard mask and crops the per-item rectangles
+  measured with the `equipment` analysis. Rectangles are 1-based and inclusive;
+  the exporter trims the transparent margin, so every PNG is tight. Result:
+  62 transparent PNGs in `src/assets/objects/`, verified item by item on
+  generated contact sheets.
+- **Catalogue:** `ART_OBJECT_IDS` / `ART_OBJECTS` now list 93 art objects
+  (31 equipment + 62 props). Tall storage (wardrobes, lockers, bookshelves,
+  binder shelves, server rack, printer cart, tall file cabinets) and the large
+  floor plants use a **1×2** footprint so they render taller than the cast
+  instead of chest-high; sofas use **2×1** (the ottoman stays 1×1) and every
+  other prop is 1×1. Cabinets, sofas and plants are solid by default; framed
+  art, the clock and small desk decor are not.
+- **Legacy maps:** `sofa_lounge → sofa_tan_three` and
+  `server_rack → rack_server_open` were added to `LEGACY_ART_MAP`, so the
+  lounge sofas in the Main Office, the Rooftop couches and the server-room
+  racks now show the new art without touching map data.
+- **Palette fix:** five gaming desks (`mint`, `gold`, `neon`, `amber`, `lilac`)
+  existed in `ART_OBJECT_IDS` but were missing from `ART_OBJECTS`, so they could
+  not be placed from the Studio. They are now in the catalogue, and the asset
+  test asserts that both lists stay in lockstep (same length, same ids), which
+  prevents unreachable art from creeping back in.
+- **Scaling:** unchanged rule — furniture fills the height of its footprint and
+  may reach up to twice the footprint width horizontally, anchored at the
+  bottom edge and depth-sorted at `tileY + height`. A 1×2 wardrobe therefore
+  reads as a tall cabinet while a 2×1 sofa reads as a wide seat.
+- **Verification:** a temporary rooftop showcase (since removed) confirmed the
+  scale against the player, the Y-sorting (tall cabinets behind the crowd,
+  sofas in front) and the remapped lounge/server props in a real browser; the
+  full suite passes with 77 assertions.
+- **Still pending:** wall styles (`Duck-ai-image-2026-10-22-09-36.jpeg`,
+  10 styles with left/face/right pieces and neighbour-aware autotiling) and the
+  IT/server extras (`09-32`, `09-32 (1)`, `09-32 (2)`).

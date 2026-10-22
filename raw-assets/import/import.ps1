@@ -107,4 +107,83 @@ switch ($Action) {
     $target = if ($Dest -ne "") { $Dest } else { Join-Path $Out "objects" }
     [SheetTool]::ExportEquipment($Src, $target, $manifest)
   }
+  "propsexport" {
+    # Prop sheets follow the same regular grid as the equipment sheets; the
+    # rectangles come from the `equipment` analysis (1-based, inclusive).
+    $cabinet = @(
+      "cabinet_file_low@42,61,131,292",
+      "cabinet_file_tall@190,61,278,292",
+      "cabinet_lateral@326,61,465,292",
+      "cabinet_file_narrow@512,61,592,292",
+      "wardrobe_wood@649,61,758,292",
+      "sideboard_wood@792,61,934,292",
+      "locker_narrow@973,61,1083,292",
+      "cabinet_glass@1114,61,1232,292",
+      "bookshelf_wood@32,332,145,575",
+      "locker_open@179,332,300,575",
+      "cabinet_supply_open@337,332,451,575",
+      "wardrobe_steel@488,332,612,575",
+      "cabinet_vent@656,332,764,575",
+      "rack_server_open@809,332,916,575",
+      "cart_printer@966,332,1083,575",
+      "cabinet_cream@1115,332,1235,575",
+      "cabinet_sink@31,642,148,852",
+      "cabinet_base_wood@179,642,305,852",
+      "locker_quad@343,642,453,852",
+      "shelf_binders_tall@491,642,607,852",
+      "pedestal_drawers@651,642,756,852",
+      "cabinet_file_open@799,642,913,852",
+      "shelf_binders_beige@953,642,1067,852",
+      "cabinet_tall_light@1106,642,1232,852",
+      "cabinet_antique@32,911,161,1117"
+    )
+    $decor = @(
+      "plant_succulent@66,41,165,293",
+      "plant_ficus@246,41,371,293",
+      "plant_snake@457,41,569,293",
+      "plant_lily@636,41,800,293",
+      "plant_hanging_macrame@854,41,1006,293",
+      "plant_cactus@1084,41,1180,293",
+      "plant_fern@34,330,201,570",
+      "plant_bonsai@246,330,407,570",
+      "plant_hydrangea@461,330,589,570",
+      "plant_palm@641,330,804,570",
+      "plant_grass@879,330,988,570",
+      "plant_pothos_crate@1050,330,1205,570",
+      "art_abstract@54,619,184,807",
+      "art_landscape@249,619,397,807",
+      "clock_wall@457,619,598,807",
+      "sculpture_gold@679,619,785,807",
+      "vase_blue@879,619,985,807",
+      "globe@1062,619,1201,807",
+      "calendar_desk@46,860,197,1033",
+      "trophy_gold@256,860,385,1033",
+      "certificate@448,860,604,1033",
+      "corkboard@645,860,818,1033",
+      "books_stack@863,860,1021,1033",
+      "lamp_table@1077,860,1185,1033"
+    )
+    $sofa = @(
+      "sofa_black_leather@80,113,310,300",
+      "sofa_tan_three@416,113,740,300",
+      "sofa_gray@832,113,1086,300",
+      "sofa_brown_leather@1181,113,1444,300",
+      "sofa_blue@58,424,333,623",
+      "sofa_chesterfield@417,424,726,623",
+      "sofa_sectional_cream@801,424,1092,623",
+      "sofa_dark_gray@1161,424,1463,623",
+      "sofa_cream_round@68,705,332,883",
+      "sofa_bench_beige@432,705,691,883",
+      "sofa_navy@792,705,1001,883",
+      "ottoman_navy@1020,705,1123,883",
+      "sofa_tan_tufted@1185,705,1440,883"
+    )
+    $manifest = switch ($Set) {
+      "decor"   { $decor }
+      "sofa"    { $sofa }
+      default   { $cabinet }
+    }
+    $target = if ($Dest -ne "") { $Dest } else { Join-Path $Out "objects" }
+    [SheetTool]::ExportEquipment($Src, $target, $manifest)
+  }
 }
