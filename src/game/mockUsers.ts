@@ -46,6 +46,7 @@ export const MOCK_COLLEAGUES: UserProfile[] = [
       shirtColor: '#db2777', // Magenta
       pantsColor: '#334155',
       accessory: 'glasses',
+      characterId: 'npc_curly',
     },
   },
   {
@@ -67,6 +68,7 @@ export const MOCK_COLLEAGUES: UserProfile[] = [
       shirtColor: '#0f172a', // Navy suit
       pantsColor: '#1e293b',
       accessory: 'glasses',
+      characterId: 'npc_silver',
     },
   },
   {
@@ -88,6 +90,7 @@ export const MOCK_COLLEAGUES: UserProfile[] = [
       shirtColor: '#059669', // Emerald
       pantsColor: '#0f172a',
       accessory: 'headset',
+      characterId: 'npc_teal',
     },
   },
   {
@@ -109,6 +112,7 @@ export const MOCK_COLLEAGUES: UserProfile[] = [
       shirtColor: '#f59e0b', // Amber
       pantsColor: '#1e293b',
       accessory: 'none',
+      characterId: 'npc_beanie',
     },
   },
   {
@@ -130,6 +134,7 @@ export const MOCK_COLLEAGUES: UserProfile[] = [
       shirtColor: '#7c3aed', // Purple
       pantsColor: '#334155',
       accessory: 'glasses',
+      characterId: 'npc_poppy',
     },
   },
 ];

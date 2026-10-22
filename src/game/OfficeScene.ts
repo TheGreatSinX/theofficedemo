@@ -46,10 +46,12 @@ import {
 } from './assets/customCharacterSheets';
 import {
   NPC_CATALOG,
+  NPC_SHEETS,
   NPC_TALK_RADIUS_TILES,
   NpcManager,
   NpcRuntime,
   NpcSheetSource,
+  getNpcSheet,
 } from './npc';
 import {
   BUILTIN_TEXTURE_KEY_BY_TILE_ID,
@@ -329,6 +331,14 @@ export class OfficeScene extends Phaser.Scene {
         this.load.image(presetKey, preset.image);
       }
     });
+
+    // The office cast used by NPCs and bots is preloaded the same way.
+    NPC_SHEETS.forEach((sheet) => {
+      const sheetKey = characterPresetTextureKey(sheet.id);
+      if (!this.textures.exists(sheetKey)) {
+        this.load.image(sheetKey, sheet.image);
+      }
+    });
   }
 
   private registerPlaceholderTextures() {
@@ -443,7 +453,7 @@ export class OfficeScene extends Phaser.Scene {
   private registerAvatarSpritesheet(key: string, config: AvatarConfig) {
     if (!this.textures || !this.anims) return;
 
-    const preset = getCharacterPreset(config.characterId);
+    const preset = this.resolveCharacterSheet(config.characterId);
     if (preset && this.registerPresetSpritesheet(key, preset)) {
       return;
     }
@@ -486,7 +496,7 @@ export class OfficeScene extends Phaser.Scene {
    * the collision footprint stays identical to the classic avatars.
    */
   private applyAvatarMetrics(sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) {
-    const preset = getCharacterPreset(config.characterId);
+    const preset = this.resolveCharacterSheet(config.characterId);
 
     if (preset) {
       this.applyPresetMetrics(sprite, preset);
@@ -515,6 +525,14 @@ export class OfficeScene extends Phaser.Scene {
     sprite.setScale(scale);
     sprite.setSize(bodyWidth, bodyHeight);
     sprite.setOffset((preset.frameWidth - bodyWidth) / 2, feetY - bodyHeight);
+  }
+
+  /**
+   * Resolves a character id to a sheet: a bundled roster preset or one of the
+   * office cast sheets used by NPCs and bots.
+   */
+  private resolveCharacterSheet(characterId?: string): CharacterPreset | undefined {
+    return getCharacterPreset(characterId) ?? getNpcSheet(characterId);
   }
 
   /**

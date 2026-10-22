@@ -4,10 +4,11 @@
  *
  * Default NPC cast.
  *
- * Each entry places one ambient character on a map. NPCs reuse the player
- * sprite pipeline, so they can point at a bundled roster preset, at a sheet
- * imported through the Studio asset library (`{ kind: 'asset', assetId }`) or
- * at a procedural avatar.
+ * The ambient characters wear the hand-drawn office cast sheets
+ * (`src/assets/npc`). Each entry places one character on a map; NPCs reuse
+ * the player sprite pipeline, so they can also point at a sheet imported
+ * through the Studio asset library (`{ kind: 'asset', assetId }`) or at a
+ * procedural avatar.
  *
  * Waypoints are tile coordinates; the NPC walks the route in order and loops
  * back to the start. Tiles are chosen to stay clear of desks, plants and
@@ -18,78 +19,46 @@ import { NpcDefinition } from './npcTypes';
 
 export const NPC_CATALOG: NpcDefinition[] = [
   {
-    id: 'npc_riley',
-    name: 'Riley Vance',
-    title: 'SOC Analyst',
+    id: 'npc_field_captain',
+    name: 'Navy Cap',
+    title: 'Floor Captain',
     mapId: 'main_office',
     x: 3,
     y: 3,
     direction: 'right',
-    sheet: { kind: 'preset', id: 'soc_analyst' },
+    sheet: { kind: 'preset', id: 'npc_captain' },
     waypoints: [{ x: 13, y: 3, pauseMs: 1200 }],
     speed: 55,
     lines: [
-      'Quiet on the logs right now — enjoy it while it lasts.',
+      'Quiet on the floor right now — enjoy it while it lasts.',
       'If the boardroom Wi-Fi drops, it is not me.',
     ],
   },
   {
-    id: 'npc_jordan',
-    name: 'Jordan Lee',
-    title: 'Consultant',
-    mapId: 'main_office',
-    x: 16,
-    y: 6,
-    direction: 'down',
-    sheet: { kind: 'preset', id: 'consultant' },
-    waypoints: [{ x: 16, y: 12, pauseMs: 800 }],
-    speed: 70,
-    lines: [
-      'Client call at 2 — coffee is the only way through those.',
-      'I keep the slide deck in the shared drive, promise.',
-    ],
-  },
-  {
-    id: 'npc_sam',
-    name: 'Sam Rivera',
-    title: 'Office Admin',
+    id: 'npc_field_hoodie',
+    name: 'Hoodie',
+    title: 'Breakroom Regular',
     mapId: 'main_office',
     x: 17,
     y: 4,
     direction: 'right',
-    sheet: { kind: 'preset', id: 'office_admin' },
+    sheet: { kind: 'preset', id: 'npc_amber' },
     waypoints: [{ x: 22, y: 7, pauseMs: 2000 }],
     speed: 45,
     lines: [
-      'New badges are on the desk by the water cooler.',
-      'Meeting rooms need a quick tidy before the next standup.',
+      'Third coffee today. Do not judge me.',
+      'The vending machine on floor 2 owes me a snack.',
     ],
   },
   {
-    id: 'npc_kai',
-    name: 'Kai Okafor',
-    title: 'DevOps Engineer',
-    mapId: 'main_office',
-    x: 17,
-    y: 12,
-    direction: 'up',
-    sheet: { kind: 'preset', id: 'devops_engineer' },
-    waypoints: [{ x: 21, y: 13, pauseMs: 1500 }],
-    speed: 50,
-    lines: [
-      'The racks are humming, so the deploy went fine.',
-      'Ping me before you restart the cluster, please.',
-    ],
-  },
-  {
-    id: 'npc_dana',
-    name: 'Dana Whitfield',
-    title: 'Project Manager',
+    id: 'npc_field_lilac',
+    name: 'Lilac Sweater',
+    title: 'Studio Lead',
     mapId: 'boardroom_wing',
     x: 4,
     y: 9,
     direction: 'right',
-    sheet: { kind: 'preset', id: 'project_manager' },
+    sheet: { kind: 'preset', id: 'npc_lilac' },
     waypoints: [{ x: 12, y: 9, pauseMs: 1000 }],
     speed: 60,
     lines: [
@@ -98,19 +67,35 @@ export const NPC_CATALOG: NpcDefinition[] = [
     ],
   },
   {
-    id: 'npc_noor',
-    name: 'Noor Haddad',
-    title: 'Field Engineer',
+    id: 'npc_field_ochre',
+    name: 'Ochre Coat',
+    title: 'Site Coordinator',
     mapId: 'rooftop_garden',
     x: 5,
     y: 9,
     direction: 'right',
-    sheet: { kind: 'preset', id: 'field_engineer' },
+    sheet: { kind: 'preset', id: 'npc_ochre' },
     waypoints: [{ x: 12, y: 9, pauseMs: 2500 }],
     speed: 50,
     lines: [
       'Best signal on the whole floor is up here.',
       'Do not lean over the railing, seriously.',
+    ],
+  },
+  {
+    id: 'npc_field_sand',
+    name: 'Sand Jacket',
+    title: 'Field Technician',
+    mapId: 'main_office',
+    x: 16,
+    y: 6,
+    direction: 'down',
+    sheet: { kind: 'preset', id: 'npc_sand' },
+    waypoints: [{ x: 16, y: 12, pauseMs: 800 }],
+    speed: 70,
+    lines: [
+      'Rack 4 is making noise again. It is fine.',
+      'If the badge reader beeps, wave — it always does.',
     ],
   },
 ];

@@ -46,4 +46,5 @@ switch ($Action) {
   "grid"      { [SheetTool]::GridDebug($Src, (Join-Path $Out "grid_debug.png")) }
   "export"    { [SheetTool]::Export($Src, (Join-Path $Out "export")) }
   "sheet34"   { [SheetTool]::Process34($Src, $(if ($Dest -ne "") { $Dest } else { Join-Path $Out "char_34.png" })) }
+  "npccast"   { [SheetTool]::ExportNpcCast($Src, (Join-Path $Out "export"), @("npc_captain","npc_poppy","npc_amber","npc_lilac","npc_teal","npc_ochre","npc_silver","npc_curly","npc_beanie","npc_sand")) }
 }

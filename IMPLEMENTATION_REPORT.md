@@ -399,3 +399,27 @@ same sprite pipeline as players and can be talked to.
 - **Verification:** `tsc`, `vite build` and the suite pass (73 assertions);
   the new NPC suite covers facing, step/arrival math, route building, the
   dialogue cycle and the catalog.
+
+## 16. Office cast replaces the placeholder bots
+
+The blue-uniform placeholder sprites that filled the floor are gone. The
+office now uses a hand-drawn cast imported from a single AI sheet.
+
+- **Source:** `raw-assets/npc_cast_sheet.jpeg` (1024×1536, ten characters, one
+  per row, twelve frames per row: down(3) / side(3) / side(3) / up(3)).
+- **Importer:** the new `npccast` action of `raw-assets/import/SheetTool.cs`
+  masks the background with the same checker/AA pass as the other importers,
+  detects the ten rows and the twelve columns per row, measures the two side
+  groups (face offset against the body centre) so the left-facing group always
+  becomes the LEFT row, and writes one 97×153, 3×4 sheet per character into
+  `src/assets/npc/`.
+- **Registry:** `src/game/npc/npcSprites.ts` (`NPC_SHEETS`, `getNpcSheet`).
+  `OfficeScene.resolveCharacterSheet` now resolves a character id to either a
+  roster preset or a cast sheet, and the preload step loads both, so NPCs and
+  bots use the exact same texture/animation pipeline as players.
+- **Bots:** the five mock colleagues and the extended roster now wear cast
+  characters instead of the generated 32×32 avatars, and the ambient NPCs in
+  `npcCatalog.ts` were recast onto the new sheets.
+- **Verification:** `tsc`, `vite build` and the suite pass (73 assertions);
+  every exported character was inspected for facing (left row faces left,
+  right row faces right) and frame alignment.

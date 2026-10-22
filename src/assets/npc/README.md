@@ -1,6 +1,6 @@
 # NPC assets
 
-Art used by the ambient cast (`src/game/npc/`).
+Art used by the ambient cast (`src/game/npc/`) and the office bots.
 
 NPCs reuse the **same** sprite pipeline as players, so anything in here has to
 follow the RPG Maker MZ character-sheet convention:
@@ -10,31 +10,46 @@ follow the RPG Maker MZ character-sheet convention:
 column 0 step · column 1 standing (idle) · column 2 step
 ```
 
+## The office cast
+
+`char_npc_*.png` — ten characters imported from
+`raw-assets/npc_cast_sheet.jpeg` (a horizontal AI cast sheet: one character per
+row, twelve frames per row). The `npccast` action of `raw-assets/import/`
+masks the background, measures which of the two side groups faces left, and
+writes one 3×4 sheet per character:
+
+```powershell
+cd raw-assets/import
+powershell -ExecutionPolicy Bypass -File import.ps1 -Action npccast -Src ..\npc_cast_sheet.jpeg
+```
+
+The registry lives in `src/game/npc/npcSprites.ts` (`NPC_SHEETS`).
+
 ## Where NPCs get their sprites
 
 `NpcDefinition.sheet` picks one of three sources:
 
 | Source | Where it comes from | Notes |
 | --- | --- | --- |
-| `{ kind: 'preset', id }` | `src/assets/characters/char_<id>.png` | The bundled hand-drawn cast. |
+| `{ kind: 'preset', id }` | `src/assets/characters/` **or** `src/assets/npc/` | The hand-drawn cast. |
 | `{ kind: 'asset', assetId }` | Studio → Assets (imported sheet) | Any MZ 3×4 or 12×8 sheet from the asset library. |
 | `{ kind: 'procedural', avatar }` | Generated at runtime | Classic 32×32 avatar colours. |
 
 ## Adding a new NPC
 
-1. Put the sprite in `src/assets/characters/` (or import it through the
-   Studio asset library) and register it in `src/game/characterPresets.ts`.
+1. Put the sprite in `src/assets/npc/` (or import it through the Studio asset
+   library) and register it in `src/game/npc/npcSprites.ts`.
 2. Add the definition to `src/game/npc/npcCatalog.ts`:
 
 ```ts
 {
-  id: 'npc_ada',
+  id: 'npc_field_ada',
   name: 'Ada Byron',
   title: 'Analyst',
   mapId: 'main_office',
   x: 5, y: 7,               // spawn tile
   direction: 'down',
-  sheet: { kind: 'preset', id: 'consultant' },
+  sheet: { kind: 'preset', id: 'npc_captain' },
   waypoints: [{ x: 9, y: 7, pauseMs: 1500 }],
   speed: 60,
   lines: ['Sprint board is up to date.'],

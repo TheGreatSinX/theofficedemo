@@ -18,7 +18,12 @@ export interface IPresenceService {
 }
 
 function createExtendedMockRoster(): UserProfile[] {
+  // The office population is drawn from the hand-drawn cast sheets
+  // (`src/assets/npc`) instead of the old blue-uniform bots: every bot wears
+  // one of those characters, so the floor no longer fills up with identical
+  // placeholder sprites.
   const base = [...MOCK_COLLEAGUES];
+  const castIds = ['npc_captain', 'npc_amber', 'npc_lilac', 'npc_ochre', 'npc_sand'];
   const additionalNames = [
     { name: 'Daniel Kim', title: 'Data Engineer', map: 'main_office', status: 'online' as const },
     { name: 'Chloe Vance', title: 'QA Lead', map: 'boardroom_wing', status: 'in_meeting' as const },
@@ -50,6 +55,7 @@ function createExtendedMockRoster(): UserProfile[] {
         shirtColor: '#3b82f6',
         pantsColor: '#1e293b',
         accessory: 'badge',
+        characterId: castIds[i % castIds.length],
       },
     });
   });

@@ -306,6 +306,176 @@ public static class SheetTool
     // =====================  EXPORT  =====================
 
     /**
+     * Imports a horizontal cast sheet: one character per row, 12 frames per
+     * row laid out as down(3) / side(3) / side(3) / up(3).
+     *
+     * The two side groups are measured (face offset against the body centre)
+     * so the left-facing group always becomes the LEFT row and the other one
+     * the RIGHT row. Every character is written as its own 97x153, 3x4 sheet.
+     */
+    public static string ExportNpcCast(string path, string outDir, string[] names)
+    {
+        Pix pix = LoadPix(path);
+        int W = pix.W, H = pix.H;
+        int cleared;
+        bool[] bg = BuildMask(pix, 250, out cleared);
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("size " + W + "x" + H + " cleared=" + cleared);
+
+        int[] rowCnt = new int[H];
+        for (int y = 0; y < H; y++)
+        {
+            int c = 0;
+            for (int x = 0; x < W; x++) if (!bg[y * W + x]) c++;
+            rowCnt[y] = c;
+        }
+        List<int[]> rows = Bands(rowCnt, H, 20, 6);
+        sb.AppendLine("rows=" + rows.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            sb.AppendLine("  row " + (i + 1) + " y" + rows[i][0] + ".." + rows[i][1] + " h=" + (rows[i][1] - rows[i][0] + 1));
+        }
+
+        System.IO.Directory.CreateDirectory(outDir);
+        List<string> written = new List<string>();
+
+        for (int ri = 0; ri < rows.Count; ri++)
+        {
+            int[] row = rows[ri];
+            int[] colCnt = new int[W];
+            for (int y = row[0]; y <= row[1]; y++)
+                for (int x = 0; x < W; x++)
+                    if (!bg[y * W + x]) colCnt[x]++;
+            List<int[]> cols = Bands(colCnt, W, 3, 4);
+            sb.AppendLine("  row " + (ri + 1) + " columns=" + cols.Count);
+            if (cols.Count < 12) continue;
+
+            // Extract the 12 frames of this character.
+            List<Extracted> frames = new List<Extracted>();
+            for (int ci = 0; ci < 12; ci++)
+            {
+                int[] band = cols[ci];
+                int xa = Math.Max(0, band[0] - 2), xb = Math.Min(W - 1, band[1] + 2);
+                int ya = Math.Max(0, row[0] - 4), yb = Math.Min(H - 1, row[1] + 4);
+                int minx = int.MaxValue, miny = int.MaxValue, maxx = -1, maxy = -1;
+                for (int y = ya; y <= yb; y++)
+                    for (int x = xa; x <= xb; x++)
+                        if (!bg[y * W + x])
+                        {
+                            if (x < minx) minx = x; if (x > maxx) maxx = x;
+                            if (y < miny) miny = y; if (y > maxy) maxy = y;
+                        }
+                Extracted e = new Extracted();
+                e.Row = ri; e.Slot = ci;
+                if (maxx < 0) { e.W = 0; e.H = 0; frames.Add(e); continue; }
+                e.X = minx; e.Y = miny; e.W = maxx - minx + 1; e.H = maxy - miny + 1;
+                Bitmap bmp = new Bitmap(e.W, e.H, PixelFormat.Format32bppArgb);
+                for (int y = miny; y <= maxy; y++)
+                {
+                    for (int x = minx; x <= maxx; x++)
+                    {
+                        if (!bg[y * W + x])
+                            bmp.SetPixel(x - minx, y - miny, Color.FromArgb(255, pix.R(x, y), pix.G(x, y), pix.B(x, y)));
+                    }
+                }
+                e.Bmp = bmp;
+                frames.Add(e);
+            }
+
+            // Which side group faces which way?
+            double offsetA = FaceOffset(frames[4]);
+            double offsetB = FaceOffset(frames[7]);
+            bool aIsRight = offsetA > offsetB;
+            sb.AppendLine("    face offset sideA=" + Math.Round(offsetA, 1) + " sideB=" + Math.Round(offsetB, 1) +
+                          " -> " + (aIsRight ? "sideA=right" : "sideA=left"));
+
+            // Source group order: down(0-2) sideA(3-5) sideB(6-8) up(9-11).
+            List<Extracted> groups = new List<Extracted>();
+            groups.Add(frames[0]); groups.Add(frames[1]); groups.Add(frames[2]);
+            if (aIsRight)
+            {
+                groups.Add(frames[6]); groups.Add(frames[7]); groups.Add(frames[8]);
+                groups.Add(frames[3]); groups.Add(frames[4]); groups.Add(frames[5]);
+            }
+            else
+            {
+                groups.Add(frames[3]); groups.Add(frames[4]); groups.Add(frames[5]);
+                groups.Add(frames[6]); groups.Add(frames[7]); groups.Add(frames[8]);
+            }
+            groups.Add(frames[9]); groups.Add(frames[10]); groups.Add(frames[11]);
+
+            // One scale for the whole character so the frames stay consistent.
+            List<int> hs = new List<int>();
+            List<int> ws = new List<int>();
+            foreach (Extracted e in groups) { if (e.W > 0) { hs.Add(e.H); ws.Add(e.W); } }
+            hs.Sort(); ws.Sort();
+            int medianH = hs[hs.Count / 2];
+            int maxH = hs[hs.Count - 1];
+            int maxW = ws[ws.Count - 1];
+            double scale = 143.0 / medianH;
+            scale = Math.Min(scale, 145.0 / maxH);
+            scale = Math.Min(scale, 93.0 / maxW);
+            sb.AppendLine("    medianH=" + medianH + " maxH=" + maxH + " maxW=" + maxW + " scale=" + Math.Round(scale, 3));
+
+            const int FW = 97, FH = 153, FEET = 147;
+            using (Bitmap sheet = new Bitmap(FW * 3, FH * 4, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(sheet))
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    for (int i = 0; i < groups.Count; i++)
+                    {
+                        Extracted e = groups[i];
+                        if (e.W == 0) continue;
+                        int dir = i / 3, col = i % 3;
+                        int sw = (int)Math.Round(e.W * scale);
+                        int sh = (int)Math.Round(e.H * scale);
+                        if (sh > FEET - 6) sh = FEET - 6;
+                        int dx = col * FW + (FW - sw) / 2;
+                        int dy = dir * FH + (FEET - sh);
+                        g.DrawImage(e.Bmp, new Rectangle(dx, dy, sw, sh), 0, 0, e.W, e.H, GraphicsUnit.Pixel);
+                    }
+                }
+                string id = ri < names.Length ? names[ri] : "npc_" + (ri + 1);
+                string outPath = System.IO.Path.Combine(outDir, "char_" + id + ".png");
+                sheet.Save(outPath, ImageFormat.Png);
+                written.Add(outPath);
+                sb.AppendLine("    saved " + outPath);
+            }
+        }
+
+        sb.AppendLine("characters=" + written.Count);
+        return sb.ToString();
+    }
+
+    /**
+     * Measures how far the face sits from the body centre of a frame.
+     * Positive means the character faces right, negative means left.
+     */
+    private static double FaceOffset(Extracted frame)
+    {
+        if (frame.W == 0) return 0;
+        Bitmap bmp = frame.Bmp;
+        double skinX = 0, bodyX = 0;
+        int skinN = 0, bodyN = 0;
+        for (int y = 0; y < bmp.Height; y++)
+        {
+            for (int x = 0; x < bmp.Width; x++)
+            {
+                Color c = bmp.GetPixel(x, y);
+                if (c.A < 128) continue;
+                bodyX += x; bodyN++;
+                bool skin = c.R > 165 && c.G > 95 && c.B < 175 && (c.R - c.G) > 12 && (c.G - c.B) > 8;
+                if (skin) { skinX += x; skinN++; }
+            }
+        }
+        if (skinN < 20 || bodyN == 0) return 0;
+        double skinCx = skinX / skinN, bodyCx = bodyX / bodyN;
+        return skinCx - bodyCx;
+    }
+
+    /**
      * Standardizes a standalone 3x4 RPG Maker sheet (one character, 3 columns
      * x 4 rows) into the 97x153 frames used by the preset registry.
      *

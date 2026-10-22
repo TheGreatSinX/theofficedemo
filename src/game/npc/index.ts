@@ -8,4 +8,5 @@
 export * from './npcTypes';
 export * from './npcPathing';
 export * from './npcCatalog';
+export * from './npcSprites';
 export * from './NpcManager';
