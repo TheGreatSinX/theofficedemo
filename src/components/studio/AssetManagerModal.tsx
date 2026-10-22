@@ -19,6 +19,7 @@ import {
   AssetValidationResult,
 } from '../../types/assets';
 import { NumberField, SelectField, TextField } from './StudioChrome';
+import { isCharacterSheetAsset } from '../../game/assets/customCharacterSheets';
 
 export interface AssetManagerModalProps {
   isOpen: boolean;
@@ -347,6 +348,11 @@ export const AssetManagerModal: React.FC<AssetManagerModalProps> = ({ isOpen, on
                         <span className={badge}>
                           {asset.category}
                         </span>
+                        {isCharacterSheetAsset(asset) && (
+                          <span className={badge + ' rpg-chip-green'} title="Can be used as your avatar">
+                            avatar-ready
+                          </span>
+                        )}
                         <span
                           className={
                             badge +

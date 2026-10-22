@@ -40,6 +40,10 @@ import { RemotePlayerManager } from '../multiplayer/RemotePlayerManager';
 import { PlayerNetState } from '../multiplayer/protocol';
 import { assetRegistry } from '../services/AssetRegistry';
 import {
+  CustomCharacterSheet,
+  resolveCustomCharacterSheet,
+} from './assets/customCharacterSheets';
+import {
   BUILTIN_TEXTURE_KEY_BY_TILE_ID,
   findTilesetForTile,
   getCollisionLayer,
@@ -490,6 +494,112 @@ export class OfficeScene extends Phaser.Scene {
     sprite.setOffset(7 * this.tileScale, 20 * this.tileScale);
   }
 
+  /**
+   * Texture key shared by every avatar that uses the same imported sheet.
+   */
+  private customCharacterTextureKey(assetId: string, characterIndex: number): string {
+    return `custom_char_${assetId}_${characterIndex}`;
+  }
+
+  /**
+   * Registers an imported character sheet (Studio asset library) as a Phaser
+   * texture with the 12 frames the avatar animations expect.
+   *
+   * Returns null when the sheet is not available on this device — for
+   * example an asset that was never mirrored to the cloud — so the caller can
+   * keep the procedural fallback.
+   */
+  private async ensureCustomCharacterTexture(
+    assetId: string,
+    characterIndex: number
+  ): Promise<{ key: string; sheet: CustomCharacterSheet } | null> {
+    // The registry is only initialized when the asset library is opened; make
+    // sure the local mirror (and its binaries) are available here.
+    if (!assetRegistry.isInitialized()) {
+      await assetRegistry.initialize();
+    }
+
+    const meta = assetRegistry.get(assetId);
+    if (!meta) return null;
+
+    const sheet = resolveCustomCharacterSheet(meta, characterIndex);
+    if (!sheet) return null;
+
+    const key = this.customCharacterTextureKey(assetId, characterIndex);
+    if (!this.textures.exists(key)) {
+      const image = await assetRegistry.getImage(assetId);
+      if (!image) return null;
+
+      const texture = this.textures.addImage(key, image);
+      if (!texture) return null;
+
+      // Uploaded sheets are usually high resolution; linear filtering keeps
+      // the downscale soft instead of shimmering.
+      texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+
+      sheet.frames.forEach((frame, index) => {
+        texture.add(index, 0, frame.sx, frame.sy, frame.sw, frame.sh);
+      });
+
+      this.createAvatarAnimations(key);
+    }
+
+    return { key, sheet };
+  }
+
+  /**
+   * Applies display scale and physics body metrics for an imported sheet.
+   * Mirrors the preset metrics: the sheet is scaled to ~1.4 tiles tall and
+   * the body is expressed in source pixels so the collision footprint matches
+   * the classic 32×32 avatars.
+   */
+  private applyCustomCharacterMetrics(
+    sprite: Phaser.Physics.Arcade.Sprite,
+    sheet: CustomCharacterSheet
+  ) {
+    const displayHeight = 44 * this.tileScale;
+    const scale = displayHeight / sheet.frameHeight;
+    const bodyWidth = (18 * this.tileScale) / scale;
+    const bodyHeight = (12 * this.tileScale) / scale;
+    // Imported sheets have no baked margin: the feet sit on the last row.
+    const feetY = sheet.frameHeight - Math.max(1, Math.round(sheet.frameHeight * 0.02));
+
+    sprite.setScale(scale);
+    sprite.setSize(bodyWidth, bodyHeight);
+    sprite.setOffset((sheet.frameWidth - bodyWidth) / 2, feetY - bodyHeight);
+  }
+
+  /**
+   * Swaps a sprite over to an imported character sheet once it is available.
+   * Returns the texture key that was applied, or null when the sheet could
+   * not be loaded (the caller keeps the procedural fallback).
+   */
+  public async applyCustomCharacterAvatar(
+    sprite: Phaser.Physics.Arcade.Sprite,
+    config: AvatarConfig,
+    direction: Direction = 'down'
+  ): Promise<string | null> {
+    const assetId = config.customCharacterAssetId;
+    if (!assetId) return null;
+
+    const result = await this.ensureCustomCharacterTexture(
+      assetId,
+      config.customCharacterIndex ?? 0
+    );
+    if (!result) return null;
+    if (!sprite.active) return null;
+
+    sprite.setTexture(result.key);
+    this.applyCustomCharacterMetrics(sprite, result.sheet);
+
+    const idleKey = `${result.key}_idle_${direction}`;
+    if (this.anims.exists(idleKey)) {
+      sprite.play(idleKey, true);
+    }
+
+    return result.key;
+  }
+
   create() {
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
@@ -591,6 +701,14 @@ export class OfficeScene extends Phaser.Scene {
           console.warn('Error playing avatar animation:', err);
         }
       }
+    }
+    // Uploaded sheet from the asset library: swap it in once the image loads.
+    if (newConfig.customCharacterAssetId && this.player && this.player.active) {
+      void this.applyCustomCharacterAvatar(
+        this.player,
+        newConfig,
+        this.playerProfile.direction
+      );
     }
   }
 
@@ -881,6 +999,15 @@ export class OfficeScene extends Phaser.Scene {
 
     this.player = this.physics.add.sprite(spawnX, spawnY, 'player_avatar');
     this.applyAvatarMetrics(this.player, this.playerProfile.avatarConfig);
+    // Uploaded sheet from the asset library (the player sprite is rebuilt on
+    // every map change, so the swap has to be re-applied here).
+    if (this.playerProfile.avatarConfig.customCharacterAssetId) {
+      void this.applyCustomCharacterAvatar(
+        this.player,
+        this.playerProfile.avatarConfig,
+        this.playerProfile.direction
+      );
+    }
     this.player.setCollideWorldBounds(true);
     this.player.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + spawnY + 0.3);
     this.createRagnarokNameplate(this.player, `${this.playerProfile.name} (You)`, '#38bdf8', true);
@@ -893,7 +1020,8 @@ export class OfficeScene extends Phaser.Scene {
         (key, cfg) => this.registerAvatarSpritesheet(key, cfg),
         this.staticWallsGroup,
         this.tileScale,
-        (sprite, cfg) => this.applyAvatarMetrics(sprite, cfg)
+        (sprite, cfg) => this.applyAvatarMetrics(sprite, cfg),
+        (sprite, cfg, direction) => this.applyCustomCharacterAvatar(sprite, cfg, direction)
       );
     } else {
       this.remotePlayerManager.setLocalUserId(this.playerProfile.id);
@@ -1489,6 +1617,11 @@ export class OfficeScene extends Phaser.Scene {
 
     const nameTag = this.createRagnarokNameplate(sprite, `${user.name} · ${user.title.split(' ')[0]}`, accent, false);
     this.otherUserSprites.set(user.id, { sprite, nameTag, profile: user });
+
+    // Uploaded sheet from the asset library: swap it in once the image loads.
+    if (user.avatarConfig.customCharacterAssetId) {
+      void this.applyCustomCharacterAvatar(sprite, user.avatarConfig, user.direction);
+    }
   }
 
   public showSpeechBubble(senderId: string, text: string, durationMs: number = 4500) {

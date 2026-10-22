@@ -3,11 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AvatarConfig, UserProfile } from '../types/game';
+import { AssetMetadata } from '../types/assets';
 import { generateAvatarSpritesheet } from '../game/pixelArtGenerator';
 import { CHARACTER_PRESETS, getCharacterPreset } from '../game/characterPresets';
-import { X, Check, Shirt } from 'lucide-react';
+import {
+  characterCountFor,
+  isCharacterSheetAsset,
+  resolveCustomCharacterSheet,
+} from '../game/assets/customCharacterSheets';
+import { assetRegistry } from '../services/AssetRegistry';
+import { X, Check, Shirt, Upload } from 'lucide-react';
 import { sounds } from '../game/soundEffects';
 
 interface AvatarCustomizerModalProps {
@@ -65,6 +72,68 @@ const ACCESSORIES: { id: AvatarConfig['accessory']; label: string }[] = [
   { id: 'badge', label: 'Security Badge' },
 ];
 
+/**
+ * Draws the down-facing idle frame of an imported character sheet so the
+ * roster tile matches what the player will actually walk around with.
+ */
+const UploadedSheetThumb: React.FC<{
+  asset: AssetMetadata;
+  characterIndex: number;
+  className?: string;
+}> = ({ asset, characterIndex, className }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let cancelled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const sheet = resolveCustomCharacterSheet(asset, characterIndex);
+    if (!sheet) return;
+
+    assetRegistry.getImage(asset.id).then((image) => {
+      if (cancelled || !image) return;
+      // Frame 1 is the down-facing idle pose (middle column).
+      const frame = sheet.frames[1];
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      const scale = Math.min(canvas.width / frame.sw, canvas.height / frame.sh);
+      const w = frame.sw * scale;
+      const h = frame.sh * scale;
+      ctx.drawImage(
+        image,
+        frame.sx,
+        frame.sy,
+        frame.sw,
+        frame.sh,
+        (canvas.width - w) / 2,
+        (canvas.height - h) / 2,
+        w,
+        h
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [asset, characterIndex]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={64}
+      height={64}
+      className={className}
+      style={{ imageRendering: 'pixelated' }}
+      aria-hidden="true"
+    />
+  );
+};
+
 export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
   isOpen,
   onClose,
@@ -75,8 +144,26 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
   const [title, setTitle] = useState(playerProfile.title);
   const [status, setStatus] = useState<UserProfile['status']>(playerProfile.status);
   const [config, setConfig] = useState<AvatarConfig>({ ...playerProfile.avatarConfig });
+  const [uploads, setUploads] = useState<AssetMetadata[]>([]);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const activePreset = getCharacterPreset(config.characterId);
+  const activeUpload = config.customCharacterAssetId
+    ? assetRegistry.get(config.customCharacterAssetId)
+    : undefined;
+  const uploadCharacterIndex = config.customCharacterIndex ?? 0;
+
+  // Character sheets imported through the Studio asset library.
+  const refreshUploads = useCallback(() => {
+    setUploads(assetRegistry.list().filter(isCharacterSheetAsset));
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    // The registry may not have been touched yet in this session.
+    void assetRegistry.initialize().then(refreshUploads);
+    refreshUploads();
+    return assetRegistry.subscribe(refreshUploads);
+  }, [isOpen, refreshUploads]);
 
   // Sync state when opened
   useEffect(() => {
@@ -127,6 +214,40 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
       };
     }
 
+    // Imported character sheet from the asset library.
+    const upload = config.customCharacterAssetId
+      ? assetRegistry.get(config.customCharacterAssetId)
+      : undefined;
+    if (upload) {
+      const sheet = resolveCustomCharacterSheet(upload, config.customCharacterIndex ?? 0);
+      if (sheet) {
+        let cancelled = false;
+        assetRegistry.getImage(upload.id).then((image) => {
+          if (cancelled || !image) return;
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          const frame = sheet.frames[1];
+          const scale = Math.min(canvas.width / frame.sw, canvas.height / frame.sh);
+          const w = frame.sw * scale;
+          const h = frame.sh * scale;
+          ctx.drawImage(
+            image,
+            frame.sx,
+            frame.sy,
+            frame.sw,
+            frame.sh,
+            (canvas.width - w) / 2,
+            (canvas.height - h) / 2,
+            w,
+            h
+          );
+        });
+        return () => {
+          cancelled = true;
+        };
+      }
+    }
+
     ctx.imageSmoothingEnabled = false;
     // Generate spritesheet and grab idle down frame (frame 1, row 0: x=32, y=0, w=32, h=32)
     const sheetCanvas = generateAvatarSpritesheet(config);
@@ -138,6 +259,21 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
   const selectCustomAvatar = () => {
     const next = { ...config };
     delete next.characterId;
+    delete next.customCharacterAssetId;
+    delete next.customCharacterIndex;
+    setConfig(next);
+  };
+
+  const selectPreset = (presetId: string) => {
+    const next = { ...config, characterId: presetId };
+    delete next.customCharacterAssetId;
+    delete next.customCharacterIndex;
+    setConfig(next);
+  };
+
+  const selectUpload = (asset: AssetMetadata, characterIndex = 0) => {
+    const next = { ...config, customCharacterAssetId: asset.id, customCharacterIndex: characterIndex };
+    delete next.characterId;
     setConfig(next);
   };
 
@@ -146,6 +282,8 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
     // Keep undefined values out of the Firestore payload.
     const avatarConfig: AvatarConfig = { ...config };
     if (!avatarConfig.characterId) delete avatarConfig.characterId;
+    if (!avatarConfig.customCharacterAssetId) delete avatarConfig.customCharacterAssetId;
+    if (avatarConfig.customCharacterAssetId === undefined) delete avatarConfig.customCharacterIndex;
     onSaveProfile({
       ...playerProfile,
       name: name.trim() || 'Colleague',
@@ -247,7 +385,7 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                   onClick={selectCustomAvatar}
                   title="Build a custom avatar from colors"
                   className={`rpg-inset flex flex-col items-center gap-1 p-1.5 cursor-pointer transition-colors ${
-                    !activePreset ? 'rpg-inset-active' : ''
+                    !activePreset && !activeUpload ? 'rpg-inset-active' : ''
                   }`}
                 >
                   <div className="character-thumb character-thumb-custom">
@@ -255,7 +393,7 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                   </div>
                   <span
                     className={`text-[9px] leading-tight text-center ${
-                      !activePreset ? 'text-rpg-text' : 'text-rpg-dim'
+                      !activePreset && !activeUpload ? 'text-rpg-text' : 'text-rpg-dim'
                     }`}
                   >
                     Custom
@@ -267,7 +405,7 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                     <button
                       key={preset.id}
                       type="button"
-                      onClick={() => setConfig({ ...config, characterId: preset.id })}
+                      onClick={() => selectPreset(preset.id)}
                       title={preset.tagline}
                       className={`rpg-inset flex flex-col items-center gap-1 p-1.5 cursor-pointer transition-colors ${
                         selected ? 'rpg-inset-active' : ''
@@ -296,8 +434,76 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
               )}
             </div>
 
-            {/* Procedural colors (disabled while a preset is selected) */}
-            <div className={activePreset ? 'space-y-4 opacity-40 pointer-events-none select-none' : 'space-y-4'}>
+            {/* Uploaded character sheets (Studio asset library) */}
+            <div>
+              <div className="flex items-baseline justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-rpg-text">Uploaded Sheets</span>
+                <span className="text-[9px] text-rpg-dim">RPG Maker 3×4</span>
+              </div>
+              {uploads.length === 0 ? (
+                <div className="rpg-inset flex items-center gap-2 p-2.5">
+                  <Upload className="w-4 h-4 text-rpg-dim shrink-0" />
+                  <p className="text-[9px] text-rpg-dim leading-snug">
+                    No character sheets yet. Import a 3×4 RPG Maker sheet in Studio → Assets, then pick
+                    it here.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {uploads.map((asset) => {
+                    const selected = config.customCharacterAssetId === asset.id;
+                    const count = characterCountFor(asset);
+                    return (
+                      <button
+                        key={asset.id}
+                        type="button"
+                        onClick={() => selectUpload(asset, selected ? uploadCharacterIndex : 0)}
+                        title={`${asset.name} · ${asset.columns}×${asset.rows} frames`}
+                        className={`rpg-inset flex flex-col items-center gap-1 p-1.5 cursor-pointer transition-colors ${
+                          selected ? 'rpg-inset-active' : ''
+                        }`}
+                      >
+                        <div className="character-thumb-upload">
+                          <UploadedSheetThumb asset={asset} characterIndex={selected ? uploadCharacterIndex : 0} />
+                        </div>
+                        <span
+                          className={`text-[9px] leading-tight text-center ${
+                            selected ? 'text-rpg-text' : 'text-rpg-dim'
+                          }`}
+                        >
+                          {asset.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {activeUpload && characterCountFor(activeUpload) > 1 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {Array.from({ length: characterCountFor(activeUpload) }).map((_, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => selectUpload(activeUpload, index)}
+                      className={`rpg-btn px-2 py-0.5 text-[9px] cursor-pointer ${
+                        uploadCharacterIndex === index ? 'rpg-btn-gold' : 'rpg-btn-plain'
+                      }`}
+                    >
+                      #{index + 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {activeUpload && (
+                <p className="text-[9px] text-rpg-dim mt-1.5">
+                  Using “{activeUpload.name}”. Sheets play back with the same 3-frame walk cycle as the
+                  built-in roster. Other players see it once the sheet is shared with the cloud.
+                </p>
+              )}
+            </div>
+
+            {/* Procedural colors (disabled while a preset or uploaded sheet is selected) */}
+            <div className={activePreset || activeUpload ? 'space-y-4 opacity-40 pointer-events-none select-none' : 'space-y-4'}>
             {/* Skin Tone */}
             <div>
               <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Skin Tone</span>
@@ -418,7 +624,9 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
           <p className="text-[11px] text-rpg-dim">
             {activePreset
               ? `${activePreset.name} · synced to other players`
-              : 'Custom sprites are generated procedurally on a 32x32 canvas'}
+              : activeUpload
+                ? `${activeUpload.name} · uploaded sheet · shared with other players`
+                : 'Custom sprites are generated procedurally on a 32x32 canvas'}
           </p>
           <div className="flex gap-2">
             <button

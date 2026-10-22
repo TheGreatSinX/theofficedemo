@@ -14,6 +14,8 @@ interface RemotePlayerEntity {
   avatarConfig: AvatarConfig;
   sprite: Phaser.Physics.Arcade.Sprite;
   nameTag: Phaser.GameObjects.Container;
+  /** Texture key currently driving the sprite (may swap to an uploaded sheet). */
+  textureKey: string;
   targetX: number;
   targetY: number;
   direction: Direction;
@@ -27,6 +29,16 @@ export class RemotePlayerManager {
   private remotePlayers: Map<string, RemotePlayerEntity> = new Map();
   private registerSpritesheetFn: (key: string, config: AvatarConfig) => void;
   private applySpriteMetricsFn?: (sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) => void;
+  /**
+   * Optional hook that swaps a sprite over to a character sheet imported
+   * through the asset library. Resolves with the new texture key, or null
+   * when the sheet is not available on this device.
+   */
+  private applyCustomAvatarFn?: (
+    sprite: Phaser.Physics.Arcade.Sprite,
+    config: AvatarConfig,
+    direction: Direction
+  ) => Promise<string | null>;
   private staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup;
   /** Uniform scale applied to avatar sprites (tileSize / 32). */
   private tileScale: number = 1;
@@ -44,7 +56,12 @@ export class RemotePlayerManager {
     registerSpritesheetFn: (key: string, config: AvatarConfig) => void,
     staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup,
     tileScale: number = 1,
-    applySpriteMetricsFn?: (sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) => void
+    applySpriteMetricsFn?: (sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) => void,
+    applyCustomAvatarFn?: (
+      sprite: Phaser.Physics.Arcade.Sprite,
+      config: AvatarConfig,
+      direction: Direction
+    ) => Promise<string | null>
   ) {
     this.scene = scene;
     this.localUserId = localUserId;
@@ -52,6 +69,7 @@ export class RemotePlayerManager {
     this.staticWallsGroup = staticWallsGroup;
     this.tileScale = tileScale;
     this.applySpriteMetricsFn = applySpriteMetricsFn;
+    this.applyCustomAvatarFn = applyCustomAvatarFn;
   }
 
   /** Updates the avatar scale (called when the active map's tile size changes). */
@@ -136,6 +154,7 @@ export class RemotePlayerManager {
       avatarConfig: playerState.avatarConfig,
       sprite,
       nameTag,
+      textureKey,
       targetX: playerState.x,
       targetY: playerState.y,
       direction: playerState.direction,
@@ -144,6 +163,22 @@ export class RemotePlayerManager {
     };
 
     this.remotePlayers.set(playerState.userId, entity);
+
+    // Uploaded sheet from the asset library: swap the texture once loaded.
+    if (playerState.avatarConfig.customCharacterAssetId && this.applyCustomAvatarFn) {
+      void this.applyCustomAvatarFn(sprite, playerState.avatarConfig, playerState.direction)
+        .then((customKey) => {
+          if (!customKey || !sprite.active) return;
+          entity.textureKey = customKey;
+          const idleKey = `${customKey}_idle_${entity.direction}`;
+          if (this.scene.anims.exists(idleKey)) {
+            sprite.play(idleKey, true);
+          }
+        })
+        .catch(() => {
+          // Keep the procedural fallback avatar.
+        });
+    }
   }
 
   public updatePlayerState(
@@ -207,7 +242,7 @@ export class RemotePlayerManager {
       sprite.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + sprite.y + 0.25);
 
       // Update animations
-      const textureKey = `avatar_remote_${entity.userId}`;
+      const textureKey = entity.textureKey;
       const animKey = isMoving || dist > 1.5
         ? `${textureKey}_walk_${direction}`
         : `${textureKey}_idle_${direction}`;

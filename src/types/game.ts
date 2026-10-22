@@ -19,6 +19,15 @@ export interface AvatarConfig {
    * the previous look.
    */
   characterId?: string;
+  /**
+   * Registry id of a character sheet imported through the Studio asset
+   * library (RPG Maker MZ 3×4 layout). Mutually exclusive with
+   * `characterId`; when the sheet cannot be loaded on this device the
+   * renderer falls back to the procedural avatar.
+   */
+  customCharacterAssetId?: string;
+  /** Character block index inside a multi-character sheet (MZ 12×8 grids). */
+  customCharacterIndex?: number;
 }
 
 export interface UserProfile {

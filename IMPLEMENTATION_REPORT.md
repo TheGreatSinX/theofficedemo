@@ -342,3 +342,37 @@ synced to other players through the existing multiplayer `avatarConfig` flow.
   and the Custom tile clears `characterId`.
 - **Verification:** `tsc`, `vite build` and the full 67-assertion suite pass;
   `cast_preview.png` was inspected for frame layout, alignment and mirrored rows.
+
+## 14. Uploaded character sheets as avatars (RPG Maker MZ uploads)
+
+The asset library already understands RPG Maker MZ sheets, but they could only
+be painted into maps. Players can now upload their own MZ character sheet and
+walk around with it.
+
+- **Data model:** `AvatarConfig.customCharacterAssetId?: string` points at a
+  registry asset and `customCharacterIndex?: number` selects the character
+  block inside a multi-character sheet. Both are optional and flow through the
+  existing `avatarConfig` map (profile → ticket → Durable Object →
+  `RemotePlayerManager`), so no protocol or Firestore rule changed.
+- **Frame math (`src/game/assets/customCharacterSheets.ts`):** pure, DOM-free
+  helpers map an imported sheet to the 12 frames the renderer expects. A `$`
+  sheet (3×4) is one character; a standard sheet (12×8) holds 4 characters per
+  row and 2 rows, and the block index selects one of the eight characters.
+  Sheets configured manually as a plain 3×4 grid work as well.
+- **Renderer (`OfficeScene`):** `ensureCustomCharacterTexture` loads the
+  original binary through the asset registry, registers it as a Phaser texture
+  with the 12 sliced frames and reuses the shared 3-frame, 8 fps walk cycle.
+  `applyCustomCharacterAvatar` swaps a live sprite over to that texture and
+  re-applies the preset metrics (≈1.4 tiles tall, body expressed in source
+  pixels). The local player, studio colleagues and remote players all use the
+  same path; remote players keep a per-entity texture key so the walk
+  animation follows the swap.
+- **Fallback:** when a sheet is not available on the device (never mirrored to
+  the cloud) the procedural avatar is used instead, so nobody renders as a
+  missing texture.
+- **Avatar Studio:** an "Uploaded Sheets" gallery lists every character sheet
+  in the asset library, previews the down-facing idle frame on a canvas and
+  lets the player pick a character block on multi-character sheets. The Asset
+  Manager marks usable sheets as "avatar-ready".
+- **Verification:** `tsc`, `vite build` and the suite pass (68 assertions); the
+  new asset test covers the 3×4 and 12×8 frame mapping.

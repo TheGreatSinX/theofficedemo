@@ -16,7 +16,38 @@ import {
   getFrameRect,
 } from '../src/game/assets/rpgMakerSheets';
 import { validateAssetFile, validateImageDimensions } from '../src/game/assets/assetValidation';
-import { DEFAULT_ASSET_LIMITS } from '../src/types/assets';
+import {
+  characterCountFor,
+  isCharacterSheetAsset,
+  resolveCustomCharacterSheet,
+} from '../src/game/assets/customCharacterSheets';
+import { AssetMetadata, DEFAULT_ASSET_LIMITS } from '../src/types/assets';
+
+function meta(overrides: Partial<AssetMetadata>): AssetMetadata {
+  return {
+    id: 'asset_test',
+    name: 'Test Sheet',
+    category: 'character',
+    fileName: 'Test.png',
+    mimeType: 'image/png',
+    fileSize: 1024,
+    width: 144,
+    height: 192,
+    hasTransparency: true,
+    frameWidth: 48,
+    frameHeight: 48,
+    columns: 3,
+    rows: 4,
+    layout: 'character_single',
+    rpgMakerFamily: null,
+    isDollar: false,
+    isBang: false,
+    storageBackend: 'indexeddb',
+    storagePath: 'assets/asset_test/Test.png',
+    createdAt: 0,
+    ...overrides,
+  };
+}
 
 let passedCount = 0;
 let failedCount = 0;
@@ -144,6 +175,48 @@ async function runTests() {
 
     const bogus = validateImageDimensions(Number.NaN, 100);
     assert.strictEqual(bogus.ok, false);
+  });
+
+  await test('Test 8: Imported character sheets map to the 12 avatar frames', () => {
+    const single = meta({});
+    assert.strictEqual(isCharacterSheetAsset(single), true);
+    assert.strictEqual(characterCountFor(single), 1);
+
+    const sheet = resolveCustomCharacterSheet(single);
+    assert.ok(sheet, 'A 3×4 sheet must resolve');
+    assert.strictEqual(sheet.frames.length, 12);
+    // Row-major: down (0-2), left (3-5), right (6-8), up (9-11).
+    assert.deepStrictEqual(sheet.frames[0], { sx: 0, sy: 0, sw: 48, sh: 48 });
+    assert.deepStrictEqual(sheet.frames[1], { sx: 48, sy: 0, sw: 48, sh: 48 });
+    assert.deepStrictEqual(sheet.frames[2], { sx: 96, sy: 0, sw: 48, sh: 48 });
+    assert.deepStrictEqual(sheet.frames[3], { sx: 0, sy: 48, sw: 48, sh: 48 });
+    assert.deepStrictEqual(sheet.frames[11], { sx: 96, sy: 144, sw: 48, sh: 48 });
+
+    // A 12×8 sheet holds 4 characters per row and 2 rows.
+    const grid = meta({
+      layout: 'character_grid',
+      columns: 12,
+      rows: 8,
+      width: 576,
+      height: 384,
+    });
+    assert.strictEqual(isCharacterSheetAsset(grid), true);
+    assert.strictEqual(characterCountFor(grid), 8);
+
+    const second = resolveCustomCharacterSheet(grid, 1);
+    assert.ok(second);
+    assert.deepStrictEqual(second.frames[0], { sx: 144, sy: 0, sw: 48, sh: 48 });
+    assert.deepStrictEqual(second.frames[11], { sx: 240, sy: 144, sw: 48, sh: 48 });
+
+    // Index 5 is the second character of the second row.
+    const sixth = resolveCustomCharacterSheet(grid, 5);
+    assert.ok(sixth);
+    assert.deepStrictEqual(sixth.frames[0], { sx: 144, sy: 192, sw: 48, sh: 48 });
+
+    // Tilesets and unknown grids are not avatars.
+    const tileset = meta({ category: 'tileset', layout: 'tileset_bcde', columns: 16, rows: 16 });
+    assert.strictEqual(isCharacterSheetAsset(tileset), false);
+    assert.strictEqual(resolveCustomCharacterSheet(tileset), null);
   });
 
   console.log('\n============================================================');

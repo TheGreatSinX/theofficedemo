@@ -106,6 +106,25 @@ canvas {
   border: 1px dashed var(--color-rpg-line);
 }
 
+/* Uploaded character sheet thumbnail: the idle frame is drawn on a canvas so
+   sheets of any frame size can be previewed. */
+.character-thumb-upload {
+  width: 42px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(7 18 48 / 0.6);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.character-thumb-upload canvas {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+}
+
 .rpg-app-bg {
   background: radial-gradient(1200px 700px at 50% -10%, #12265c 0%, #0a1540 45%, #060d24 100%) !important;
 }
