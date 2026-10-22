@@ -123,6 +123,37 @@ async function runTests() {
     assert.ok(NPC_TALK_RADIUS_TILES > 0);
   });
 
+  await test('Test 6: NPCs face the direction they walk', () => {
+    const TILE = 32;
+    for (const npc of NPC_CATALOG) {
+      const route = buildRoute({ x: npc.x, y: npc.y }, npc.waypoints);
+      if (route.length < 2) continue;
+
+      let index = 1;
+      let pos = { x: route[0].x * TILE + TILE / 2, y: route[0].y * TILE + TILE / 2 };
+
+      for (let step = 0; step < route.length * 2; step++) {
+        const target = route[index];
+        const targetPos = { x: target.x * TILE + TILE / 2, y: target.y * TILE + TILE / 2 };
+
+        // Patrol routes are axis aligned, so the sprite never has to face a
+        // diagonal that the sheet does not contain.
+        assert.ok(
+          targetPos.x === pos.x || targetPos.y === pos.y,
+          `${npc.id} has a diagonal patrol segment`
+        );
+
+        const expected =
+          targetPos.x > pos.x ? 'right' : targetPos.x < pos.x ? 'left' : targetPos.y > pos.y ? 'down' : 'up';
+        const facing = directionFromDelta(targetPos.x - pos.x, targetPos.y - pos.y, npc.direction ?? 'down');
+        assert.strictEqual(facing, expected, `${npc.id} faces ${facing} while moving ${expected}`);
+
+        pos = targetPos;
+        index = nextWaypointIndex(index, route.length);
+      }
+    }
+  });
+
   console.log('\n============================================================');
   if (failedCount > 0) {
     console.error(`GatherGrid NPC Suite: ${failedCount} test(s) FAILED (${passedCount} passed).`);

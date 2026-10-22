@@ -43,7 +43,14 @@ export const NPC_CATALOG: NpcDefinition[] = [
     y: 4,
     direction: 'right',
     sheet: { kind: 'preset', id: 'npc_amber' },
-    waypoints: [{ x: 22, y: 7, pauseMs: 2000 }],
+    // L-shaped loop: every segment (including the one back to the start)
+    // stays axis aligned, so the sprite always faces a direction the sheet
+    // has art for.
+    waypoints: [
+      { x: 22, y: 4, pauseMs: 600 },
+      { x: 22, y: 7, pauseMs: 2000 },
+      { x: 17, y: 7, pauseMs: 600 },
+    ],
     speed: 45,
     lines: [
       'Third coffee today. Do not judge me.',
