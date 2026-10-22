@@ -6,7 +6,7 @@
  * Studio Mode (map editing).
  *
  * Rendering model (schema v2):
- *  - Ground tile layers are batched into chunked RenderTextures.
+ *  - Ground tile layers are batched into chunked canvas textures.
  *  - Row tile layers (walls) become Y-sorted sprites.
  *  - Objects and avatars are Y-sorted sprites above the tile layers.
  *  - Imported RPG Maker MZ assets are resolved through the asset registry;
@@ -43,6 +43,7 @@ import { RemotePlayerManager } from '../multiplayer/RemotePlayerManager';
 import { PlayerNetState } from '../multiplayer/protocol';
 import { assetRegistry } from '../services/AssetRegistry';
 import { OBJECT_SPRITES, getObjectSprite, objectSpriteTextureKey } from './objectSprites';
+import { FLOOR_ART, floorArtTextureKey } from './floorArt';
 import {
   CustomCharacterSheet,
   resolveCustomCharacterSheet,
@@ -182,6 +183,21 @@ const ZONE_COLORS: Record<string, number> = {
   phone_booth: 0x06b6d4,
 };
 
+/**
+ * A baked block of ground tiles.
+ *
+ * Phaser 4's RenderTexture does not reliably persist `draw()` output, so each
+ * chunk is composed into an offscreen 2D canvas and uploaded as a canvas
+ * texture instead. This also keeps the bake resolution-independent and lets the
+ * ground use imported PNG tiles at their native pixel size.
+ */
+interface TerrainChunk {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  texture: Phaser.Textures.CanvasTexture;
+  image: Phaser.GameObjects.Image;
+}
+
 export class OfficeScene extends Phaser.Scene {
   private currentMapId: string = 'main_office';
   private mapData!: OfficeMapData;
@@ -209,7 +225,7 @@ export class OfficeScene extends Phaser.Scene {
   private currentNearbyNpc: NpcRuntime | null = null;
 
   // Rendering containers
-  private terrainChunks: Map<string, Phaser.GameObjects.RenderTexture> = new Map();
+  private terrainChunks: Map<string, TerrainChunk> = new Map();
   private rowLayerImages: Map<string, Phaser.GameObjects.Image> = new Map();
   private objectImageMap: Map<string, Phaser.GameObjects.Image> = new Map();
   private dirtyChunks: Set<string> = new Set();
@@ -351,6 +367,13 @@ export class OfficeScene extends Phaser.Scene {
       const spriteKey = objectSpriteTextureKey(sprite.id);
       if (!this.textures.exists(spriteKey)) {
         this.load.image(spriteKey, sprite.image);
+      }
+    });
+
+    // Hand-drawn floor tiles (procedural textures stay as the fallback).
+    FLOOR_ART.forEach((art) => {
+      if (!this.textures.exists(art.textureKey)) {
+        this.load.image(art.textureKey, art.image);
       }
     });
   }
@@ -1258,7 +1281,10 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   private clearWorld() {
-    for (const rt of this.terrainChunks.values()) rt.destroy();
+    for (const chunk of this.terrainChunks.values()) {
+      chunk.image.destroy();
+      if (this.textures.exists(chunk.texture.key)) this.textures.remove(chunk.texture.key);
+    }
     this.terrainChunks.clear();
     this.dirtyChunks.clear();
     for (const img of this.rowLayerImages.values()) img.destroy();
@@ -1330,7 +1356,11 @@ export class OfficeScene extends Phaser.Scene {
     if (layerTileId < 0) return { key: 'tile_missing', displayW: this.tileSize, displayH: this.tileSize };
 
     if (isBuiltinTileId(layerTileId)) {
-      const key = BUILTIN_TEXTURE_KEY_BY_TILE_ID[layerTileId] || 'tile_missing';
+      const artKey = floorArtTextureKey(layerTileId);
+      const key =
+        artKey && this.textures.exists(artKey)
+          ? artKey
+          : BUILTIN_TEXTURE_KEY_BY_TILE_ID[layerTileId] || 'tile_missing';
       return { key, displayW: this.tileSize, displayH: this.tileSize };
     }
 
@@ -1391,35 +1421,85 @@ export class OfficeScene extends Phaser.Scene {
     const key = this.chunkKey(layer.id, cx, cy);
     const worldX = cx * chunk * this.tileSize;
     const worldY = cy * chunk * this.tileSize;
-    const worldW = Math.min(chunk, this.mapData.width - cx * chunk) * this.tileSize;
-    const worldH = Math.min(chunk, this.mapData.height - cy * chunk) * this.tileSize;
+    const worldW = Math.max(1, Math.min(chunk, this.mapData.width - cx * chunk) * this.tileSize);
+    const worldH = Math.max(1, Math.min(chunk, this.mapData.height - cy * chunk) * this.tileSize);
 
-    let rt = this.terrainChunks.get(key);
-    if (!rt) {
-      rt = this.add.renderTexture(worldX, worldY, worldW, worldH);
-      rt.setOrigin(0, 0);
-      rt.setDepth(layer.order * 0.1);
-      this.terrainChunks.set(key, rt);
+    let entry = this.terrainChunks.get(key);
+    if (entry && (entry.canvas.width !== worldW || entry.canvas.height !== worldH)) {
+      // The map was resized under this chunk — rebuild it from scratch.
+      entry.image.destroy();
+      this.textures.remove(entry.texture.key);
+      entry = undefined;
+    }
+    if (!entry) {
+      const canvas = document.createElement('canvas');
+      canvas.width = worldW;
+      canvas.height = worldH;
+      const textureKey = `terrain_${layer.id.replace(/[^a-zA-Z0-9_-]/g, '_')}_${cx}_${cy}`;
+      const texture = this.textures.addCanvas(textureKey, canvas);
+      if (!texture) {
+        console.warn('[OfficeScene] could not create terrain chunk texture', textureKey);
+        return;
+      }
+      const image = this.add
+        .image(worldX, worldY, textureKey)
+        .setOrigin(0, 0)
+        .setDepth(layer.order * 0.1);
+      entry = { canvas, ctx: canvas.getContext('2d')!, texture, image };
+      this.terrainChunks.set(key, entry);
     }
 
-    rt.clear();
-    const stamp = new Phaser.GameObjects.Image(this, 0, 0, 'tile_missing');
+    const ctx = entry.ctx;
+    ctx.clearRect(0, 0, worldW, worldH);
+    ctx.imageSmoothingQuality = 'high';
+
     for (let y = cy * chunk; y < Math.min(cy * chunk + chunk, this.mapData.height); y++) {
       for (let x = cx * chunk; x < Math.min(cx * chunk + chunk, this.mapData.width); x++) {
         const tileId = layer.tiles?.[y]?.[x] ?? -1;
         if (tileId < 0) continue;
         const resolved = this.resolveTile(tileId);
-        stamp.setTexture(resolved.key, resolved.frame);
-        stamp.setOrigin(0.5);
-        stamp.setDisplaySize(resolved.displayW, resolved.displayH);
-        stamp.setPosition(
-          x * this.tileSize + this.tileSize / 2 - worldX,
-          y * this.tileSize + this.tileSize / 2 - worldY
-        );
-        rt.draw(stamp);
+        this.drawTileToCanvas(ctx, resolved, x * this.tileSize - worldX, y * this.tileSize - worldY);
       }
     }
-    stamp.destroy();
+
+    // Canvas textures are uploaded lazily; flag the new pixels for the GPU.
+    entry.texture.refresh();
+  }
+
+  /**
+   * Composes one tile into a ground chunk canvas.
+   *
+   * Up-scaled pixel art stays crisp (nearest), down-scaled hand-drawn art is
+   * smoothed so the 168px floor illustrations read cleanly at 32px.
+   */
+  private drawTileToCanvas(
+    ctx: CanvasRenderingContext2D,
+    resolved: { key: string; frame?: number; displayW: number; displayH: number },
+    destX: number,
+    destY: number
+  ) {
+    const texture = this.textures.get(resolved.key);
+    if (!texture || !texture.key || texture.key === '__MISSING') return;
+    const frame = texture.get(resolved.frame ?? 0);
+    const source = texture.getSourceImage() as CanvasImageSource | null;
+    if (!frame || !source) return;
+
+    const sw = frame.cutWidth || frame.width;
+    const sh = frame.cutHeight || frame.height;
+    if (sw <= 0 || sh <= 0) return;
+
+    ctx.imageSmoothingEnabled = resolved.displayW < sw * 0.75 || resolved.displayH < sh * 0.75;
+    ctx.drawImage(
+      source,
+      frame.cutX,
+      frame.cutY,
+      sw,
+      sh,
+      destX + (this.tileSize - resolved.displayW) / 2,
+      destY + (this.tileSize - resolved.displayH) / 2,
+      resolved.displayW,
+      resolved.displayH
+    );
   }
 
   private renderRowLayer(layer: MapLayerData) {

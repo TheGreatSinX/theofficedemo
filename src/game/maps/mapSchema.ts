@@ -56,6 +56,8 @@ export const BUILTIN_TILES: BuiltinTileDef[] = [
   { id: 3, kind: 'floor', label: 'Checkered Tile', color: '#d8d4cf', textureKey: 'tile_checkered' },
   { id: 4, kind: 'floor', label: 'Deck Wood', color: '#785b3e', textureKey: 'tile_deck' },
   { id: 5, kind: 'floor', label: 'Garden Grass', color: '#3a6338', textureKey: 'tile_grass' },
+  { id: 6, kind: 'floor', label: 'Herringbone Wood', color: '#a9763f', textureKey: 'tile_wood' },
+  { id: 7, kind: 'floor', label: 'Light Stone Tile', color: '#d9cdb4', textureKey: 'tile_checkered' },
   { id: 10, kind: 'wall', label: 'Top Moulding', color: '#1e242d', textureKey: 'wall_top' },
   { id: 11, kind: 'wall', label: 'Modern Drywall', color: '#29303d', textureKey: 'wall_face' },
   { id: 12, kind: 'wall', label: 'Skyline Window', color: '#3b82f6', textureKey: 'wall_window' },

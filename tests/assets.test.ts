@@ -8,6 +8,7 @@
  */
 
 import assert from 'node:assert';
+import { existsSync } from 'node:fs';
 import {
   detectSheetLayout,
   getAutotileFamilyLabel,
@@ -32,6 +33,8 @@ import {
   isCharacterSheetAsset,
   resolveCustomCharacterSheet,
 } from '../src/game/assets/customCharacterSheets';
+import { FLOOR_TILE_ART, floorArtTextureKey } from '../src/game/assets/floorTiles';
+import { BUILTIN_TILES } from '../src/game/maps/mapSchema';
 import { AssetMetadata, DEFAULT_ASSET_LIMITS } from '../src/types/assets';
 
 function meta(overrides: Partial<AssetMetadata>): AssetMetadata {
@@ -264,6 +267,39 @@ async function runTests() {
         `Art "${art}" is missing from the builtin object catalogue`
       );
     }
+  });
+
+  await test('Test 11: Hand-drawn floor tiles replace specific builtin floor ids', () => {
+    const floorIds = BUILTIN_TILES.filter((t) => t.kind === 'floor').map((t) => t.id);
+    assert.ok(floorIds.includes(6) && floorIds.includes(7), 'Herringbone and light stone ids exist');
+
+    const seenTiles = new Set<number>();
+    const seenArts = new Set<string>();
+    const seenKeys = new Set<string>();
+    for (const def of FLOOR_TILE_ART) {
+      assert.ok(floorIds.includes(def.tileId), `Tile ${def.tileId} is not a builtin floor`);
+      assert.ok(!seenTiles.has(def.tileId), `Tile ${def.tileId} is mapped twice`);
+      assert.ok(!seenArts.has(def.artId), `Art ${def.artId} is mapped twice`);
+      seenTiles.add(def.tileId);
+      seenArts.add(def.artId);
+
+      const key = floorArtTextureKey(def.tileId);
+      assert.strictEqual(key, `art_${def.artId}`);
+      assert.ok(!seenKeys.has(key!), `Texture key ${key} is reused`);
+      seenKeys.add(key!);
+
+      // The exported PNG must actually ship with the app.
+      assert.strictEqual(
+        existsSync(new URL(`../src/assets/objects/${def.artId}.png`, import.meta.url)),
+        true,
+        `Missing art file for ${def.artId}`
+      );
+    }
+
+    // Tiles without art keep their procedural texture.
+    assert.strictEqual(floorArtTextureKey(1), undefined);
+    assert.strictEqual(floorArtTextureKey(5), undefined);
+    assert.strictEqual(floorArtTextureKey(99), undefined);
   });
 
   console.log('\n============================================================');

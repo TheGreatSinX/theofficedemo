@@ -491,3 +491,35 @@ The procedural office furniture is replaced by the imported equipment art.
   the left row of every sheet faces left and the right row faces right (checked
   on all ten cast characters and all seven roster presets), and the player and
   remote players use the same key-based lookup.
+
+## 20. Ground floor renderer fix + hand-drawn floor tiles
+
+The office floor never actually rendered: the map background was the page
+colour, so every room looked like a dark void around the furniture.
+
+- **Root cause:** ground tile layers were baked into Phaser 4 `RenderTexture`
+  objects. In Phaser 4.2.1 `RenderTexture.draw()` produces no visible output
+  (verified with a minimal reproduction under both the WebGL and Canvas
+  renderers — `rt.draw(key)`, `rt.draw(gameObject)` and `rt.texture.stamp()`
+  all leave the texture empty). Row layers (plain `Image` sprites) rendered
+  fine, which is why only the walls were visible.
+- **Fix:** `OfficeScene` now composes each ground chunk into an **offscreen 2D
+  canvas** and uploads it as a canvas texture (`TerrainChunk`), then calls
+  `CanvasTexture.refresh()` on repaint. This is renderer independent, keeps the
+  chunked (one draw call per chunk) model, and still supports partial repaints
+  from the Studio through `dirtyChunks`.
+- **Floor art:** the six floor illustrations from the equipment sheet are
+  loaded as `art_floor_*` textures (`src/game/floorArt.ts`) and replace the
+  procedural tiles 1:1 (`src/game/assets/floorTiles.ts`):
+  wood parquet → `floor_wood`, gray marble → `floor_tile_dark`,
+  checkered → `floor_checker`, deck → `floor_wood_dark`, plus two new builtin
+  ids: 6 Herringbone Wood → `floor_herringbone` and 7 Light Stone Tile →
+  `floor_tile_light`. Blue carpet (id 1) and garden grass (id 5) have no art
+  yet and keep their procedural textures. `resolveTile()` prefers the art when
+  the texture is loaded, so a failed load falls back to the canvas tile.
+- **Scaling:** imported tiles are down-scaled with smoothing (168px art read at
+  32px), while procedural and RPG Maker pixel tiles stay nearest-neighbour when
+  scaled up.
+- **Coverage:** Main Office (parquet + blue carpet + checker + dark stone),
+  Boardroom Wing (carpet + stone) and Rooftop Garden (dark deck + grass) were
+  re-checked in a real browser; the minimap picks up the same tile colours.
