@@ -105,6 +105,4 @@ export function getCharacterPreset(id?: string | null): CharacterPreset | undefi
 }
 
 /** Phaser texture key under which a preset image is preloaded. */
-export function characterPresetTextureKey(id: string): string {
-  return `char_preset_${id}`;
-}
+export { characterPresetTextureKey, avatarSheetTextureKey, DEFAULT_CHARACTER_ID } from './assets/characterKeys';

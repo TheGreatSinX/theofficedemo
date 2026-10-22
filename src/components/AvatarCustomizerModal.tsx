@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AvatarConfig, UserProfile } from '../types/game';
 import { AssetMetadata } from '../types/assets';
 import { generateAvatarSpritesheet } from '../game/pixelArtGenerator';
-import { CHARACTER_PRESETS, getCharacterPreset } from '../game/characterPresets';
+import { CHARACTER_PRESETS, DEFAULT_CHARACTER_ID, getCharacterPreset } from '../game/characterPresets';
 import {
   characterCountFor,
   isCharacterSheetAsset,
@@ -151,6 +151,10 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
     ? assetRegistry.get(config.customCharacterAssetId)
     : undefined;
   const uploadCharacterIndex = config.customCharacterIndex ?? 0;
+  /** True when a hand-drawn sheet drives the avatar (colours are ignored). */
+  const usesSheet = Boolean(activePreset || activeUpload || config.characterId);
+  /** True when the player explicitly asked for the generated colour avatar. */
+  const usesCustomAvatar = Boolean(config.useProceduralAvatar) && !usesSheet;
 
   // Character sheets imported through the Studio asset library.
   const refreshUploads = useCallback(() => {
@@ -250,14 +254,45 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
 
     ctx.imageSmoothingEnabled = false;
     // Generate spritesheet and grab idle down frame (frame 1, row 0: x=32, y=0, w=32, h=32)
-    const sheetCanvas = generateAvatarSpritesheet(config);
-    ctx.drawImage(sheetCanvas, 32, 0, 32, 32, 0, 0, 128, 128);
-  }, [config]);
+    if (usesCustomAvatar) {
+      const sheetCanvas = generateAvatarSpritesheet(config);
+      ctx.drawImage(sheetCanvas, 32, 0, 32, 32, 0, 0, 128, 128);
+      return;
+    }
+
+    // No sheet picked yet: show the default hand-drawn character.
+    const fallback = getCharacterPreset(DEFAULT_CHARACTER_ID);
+    if (fallback) {
+      const image = new Image();
+      image.onload = () => {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        const scale = Math.min(
+          canvas.width / fallback.frameWidth,
+          canvas.height / fallback.frameHeight
+        );
+        const w = fallback.frameWidth * scale;
+        const h = fallback.frameHeight * scale;
+        ctx.drawImage(
+          image,
+          fallback.frameWidth,
+          0,
+          fallback.frameWidth,
+          fallback.frameHeight,
+          (canvas.width - w) / 2,
+          (canvas.height - h) / 2,
+          w,
+          h
+        );
+      };
+      image.src = fallback.image;
+    }
+  }, [config, usesCustomAvatar]);
 
   if (!isOpen) return null;
 
   const selectCustomAvatar = () => {
-    const next = { ...config };
+    const next = { ...config, useProceduralAvatar: true };
     delete next.characterId;
     delete next.customCharacterAssetId;
     delete next.customCharacterIndex;
@@ -268,12 +303,14 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
     const next = { ...config, characterId: presetId };
     delete next.customCharacterAssetId;
     delete next.customCharacterIndex;
+    delete next.useProceduralAvatar;
     setConfig(next);
   };
 
   const selectUpload = (asset: AssetMetadata, characterIndex = 0) => {
     const next = { ...config, customCharacterAssetId: asset.id, customCharacterIndex: characterIndex };
     delete next.characterId;
+    delete next.useProceduralAvatar;
     setConfig(next);
   };
 
@@ -284,6 +321,7 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
     if (!avatarConfig.characterId) delete avatarConfig.characterId;
     if (!avatarConfig.customCharacterAssetId) delete avatarConfig.customCharacterAssetId;
     if (avatarConfig.customCharacterAssetId === undefined) delete avatarConfig.customCharacterIndex;
+    if (!avatarConfig.useProceduralAvatar) delete avatarConfig.useProceduralAvatar;
     onSaveProfile({
       ...playerProfile,
       name: name.trim() || 'Colleague',
@@ -385,7 +423,7 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                   onClick={selectCustomAvatar}
                   title="Build a custom avatar from colors"
                   className={`rpg-inset flex flex-col items-center gap-1 p-1.5 cursor-pointer transition-colors ${
-                    !activePreset && !activeUpload ? 'rpg-inset-active' : ''
+                    usesCustomAvatar ? 'rpg-inset-active' : ''
                   }`}
                 >
                   <div className="character-thumb character-thumb-custom">
@@ -393,7 +431,7 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
                   </div>
                   <span
                     className={`text-[9px] leading-tight text-center ${
-                      !activePreset && !activeUpload ? 'text-rpg-text' : 'text-rpg-dim'
+                      usesCustomAvatar ? 'text-rpg-text' : 'text-rpg-dim'
                     }`}
                   >
                     Custom
@@ -502,8 +540,8 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
               )}
             </div>
 
-            {/* Procedural colors (disabled while a preset or uploaded sheet is selected) */}
-            <div className={activePreset || activeUpload ? 'space-y-4 opacity-40 pointer-events-none select-none' : 'space-y-4'}>
+            {/* Procedural colors (disabled while a sheet is selected) */}
+            <div className={usesSheet ? 'space-y-4 opacity-40 pointer-events-none select-none' : 'space-y-4'}>
             {/* Skin Tone */}
             <div>
               <span className="text-[11px] font-semibold text-rpg-text block mb-1.5">Skin Tone</span>
@@ -626,7 +664,9 @@ export const AvatarCustomizerModal: React.FC<AvatarCustomizerModalProps> = ({
               ? `${activePreset.name} · synced to other players`
               : activeUpload
                 ? `${activeUpload.name} · uploaded sheet · shared with other players`
-                : 'Custom sprites are generated procedurally on a 32x32 canvas'}
+                : usesCustomAvatar
+                  ? 'Custom sprites are generated procedurally on a 32x32 canvas'
+                  : 'Pick a character — the default sheet is used until you do'}
           </p>
           <div className="flex gap-2">
             <button

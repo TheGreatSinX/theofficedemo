@@ -23,6 +23,7 @@ export const INITIAL_PLAYER: UserProfile = {
     shirtColor: '#2563eb', // Royal blue
     pantsColor: '#1e293b',
     accessory: 'badge',
+    characterId: 'office_worker',
   },
 };
 

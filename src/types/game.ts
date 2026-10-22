@@ -28,6 +28,12 @@ export interface AvatarConfig {
   customCharacterAssetId?: string;
   /** Character block index inside a multi-character sheet (MZ 12×8 grids). */
   customCharacterIndex?: number;
+  /**
+   * Opt-in for the generated 32×32 colour avatar. Without it the renderer
+   * uses a hand-drawn character sheet, so nobody walks around as a
+   * placeholder sprite.
+   */
+  useProceduralAvatar?: boolean;
 }
 
 export interface UserProfile {

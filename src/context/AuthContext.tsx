@@ -115,6 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             shirtColor: resolvedRole === 'admin' ? '#7c3aed' : '#2563eb',
             pantsColor: '#1e293b',
             accessory: resolvedRole === 'admin' ? 'badge' : 'none',
+            characterId: 'office_worker',
           },
         };
 
@@ -130,6 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           shirtColor: newRole === 'admin' ? '#7c3aed' : '#2563eb',
           pantsColor: '#1e293b',
           accessory: newRole === 'admin' ? 'badge' : 'none',
+          characterId: 'office_worker',
         };
 
         const newDocPayload = {

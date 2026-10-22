@@ -17,6 +17,11 @@ import {
 } from '../src/game/assets/rpgMakerSheets';
 import { validateAssetFile, validateImageDimensions } from '../src/game/assets/assetValidation';
 import {
+  DEFAULT_CHARACTER_ID,
+  avatarSheetTextureKey,
+  characterPresetTextureKey,
+} from '../src/game/assets/characterKeys';
+import {
   characterCountFor,
   isCharacterSheetAsset,
   resolveCustomCharacterSheet,
@@ -217,6 +222,21 @@ async function runTests() {
     const tileset = meta({ category: 'tileset', layout: 'tileset_bcde', columns: 16, rows: 16 });
     assert.strictEqual(isCharacterSheetAsset(tileset), false);
     assert.strictEqual(resolveCustomCharacterSheet(tileset), null);
+  });
+
+  await test('Test 9: Avatar sheets keep a stable texture key per character', () => {
+    // Switching characters must not reuse (and therefore destroy) the
+    // texture a live sprite is still using.
+    const a = avatarSheetTextureKey('player_avatar', 'soc_analyst');
+    const b = avatarSheetTextureKey('player_avatar', 'consultant');
+    assert.notStrictEqual(a, b);
+    assert.strictEqual(a, avatarSheetTextureKey('player_avatar', 'soc_analyst'));
+    assert.strictEqual(a.startsWith('player_avatar'), true);
+
+    // The default character is always available so nobody renders as a
+    // generated placeholder sprite.
+    assert.strictEqual(DEFAULT_CHARACTER_ID, 'office_worker');
+    assert.strictEqual(characterPresetTextureKey(DEFAULT_CHARACTER_ID), 'char_preset_office_worker');
   });
 
   console.log('\n============================================================');

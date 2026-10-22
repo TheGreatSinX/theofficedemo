@@ -423,3 +423,24 @@ office now uses a hand-drawn cast imported from a single AI sheet.
 - **Verification:** `tsc`, `vite build` and the suite pass (73 assertions);
   every exported character was inspected for facing (left row faces left,
   right row faces right) and frame alignment.
+
+## 17. Avatar switching fix and placeholder removal
+
+- **Black screen on avatar change (fixed):** picking a character used to
+  destroy the `player_avatar` texture while the player sprite still referenced
+  it. The dead frame made the WebGL renderer throw
+  (`Cannot read properties of null (reading 'resolution')`) and the scene went
+  black. Avatar sheets now live under a **stable key per character**
+  (`avatarSheetTextureKey`: `player_avatar_<characterId>`), so switching
+  characters registers a new texture instead of replacing a live one, and the
+  animations are created once per sheet. Every animation lookup (player walk,
+  colleague idle, remote players) now follows the texture key actually in use
+  instead of a hard-coded name.
+- **No more placeholder sprites:** the generated 32×32 colour avatar is now
+  opt-in (`AvatarConfig.useProceduralAvatar`). Without it the renderer falls
+  back to a hand-drawn character (`DEFAULT_CHARACTER_ID`), new accounts and
+  the guest player start on a hand-drawn character, and the Avatar Studio
+  shows the default sheet until a character is picked. The "Custom" tile
+  still offers the colour generator for players who want it.
+- **Verification:** `tsc`, `vite build` and the suite pass (74 assertions);
+  the new asset test covers the stable texture-key rule.

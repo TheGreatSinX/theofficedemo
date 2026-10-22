@@ -427,7 +427,7 @@ async function runTests() {
   const remoteMgr = new RemotePlayerManager(
     mockScene,
     'local_player',
-    () => {}
+    (key: string) => key
   );
 
   await test('Test 19: Local player is never duplicated as a remote player', () => {

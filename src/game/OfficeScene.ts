@@ -33,6 +33,8 @@ import { chatService } from '../services/ChatService';
 import {
   CHARACTER_FEET_MARGIN,
   CHARACTER_PRESETS,
+  DEFAULT_CHARACTER_ID as DEFAULT_AVATAR_CHARACTER_ID,
+  avatarSheetTextureKey,
   characterPresetTextureKey,
   getCharacterPreset,
 } from './characterPresets';
@@ -186,6 +188,8 @@ export class OfficeScene extends Phaser.Scene {
 
   private player!: Phaser.Physics.Arcade.Sprite;
   private playerNameTag!: Phaser.GameObjects.Container;
+  /** Texture key that currently drives the player sprite. */
+  private playerAvatarKey: string = 'player_avatar';
   private playerProfile: UserProfile;
   private remotePlayerManager!: RemotePlayerManager;
   private otherUsers: UserProfile[] = [];
@@ -380,6 +384,11 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Removes the walk/idle animations of a texture key. Only safe when no
+   * sprite is playing them — avatar sheets now live under stable keys, so
+   * this is only used for cleanup.
+   */
   private removeAvatarAnimations(key: string) {
     const dirs = ['down', 'left', 'right', 'up'];
     dirs.forEach((dir) => {
@@ -418,44 +427,70 @@ export class OfficeScene extends Phaser.Scene {
 
   /**
    * Registers a hand-drawn preset sheet: an image texture sliced into the
-   * RPG Maker frame grid. Returns false when the source image is not loaded so
-   * the caller can fall back to the procedural avatar.
+   * RPG Maker frame grid. Returns the texture key that drives the sprite, or
+   * null when the source image is not loaded so the caller can fall back to
+   * the procedural avatar.
+   *
+   * The texture key is derived from the preset id, so switching between
+   * characters never destroys a texture that a live sprite still uses — a
+   * removed texture leaves the sprite with a dead frame and the WebGL
+   * renderer throws ("reading 'resolution' of null") and the scene goes
+   * black.
    */
-  private registerPresetSpritesheet(key: string, preset: CharacterPreset): boolean {
+  private registerPresetSpritesheet(key: string, preset: CharacterPreset): string | null {
     const presetKey = characterPresetTextureKey(preset.id);
-    if (!this.textures.exists(presetKey)) return false;
+    if (!this.textures.exists(presetKey)) return null;
     const source = this.textures.get(presetKey).getSourceImage();
-    if (!source) return false;
+    if (!source) return null;
 
-    this.removeAvatarAnimations(key);
-    if (this.textures.exists(key)) {
-      this.textures.remove(key);
-    }
+    const sheetKey = avatarSheetTextureKey(key, preset.id);
 
-    const texture = this.textures.addImage(key, source as HTMLImageElement);
-    if (!texture) return false;
+    if (!this.textures.exists(sheetKey)) {
+      const texture = this.textures.addImage(sheetKey, source as HTMLImageElement);
+      if (!texture) return null;
 
-    // The cast art is high resolution shown far below native size. Linear
-    // filtering keeps the downscale soft instead of shimmering like nearest.
-    texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+      // The cast art is high resolution shown far below native size. Linear
+      // filtering keeps the downscale soft instead of shimmering like nearest.
+      texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
 
-    const { frameWidth, frameHeight } = preset;
-    for (let row = 0; row < 4; row++) {
-      for (let col = 0; col < 3; col++) {
-        texture.add(row * 3 + col, 0, col * frameWidth, row * frameHeight, frameWidth, frameHeight);
+      const { frameWidth, frameHeight } = preset;
+      for (let row = 0; row < 4; row++) {
+        for (let col = 0; col < 3; col++) {
+          texture.add(row * 3 + col, 0, col * frameWidth, row * frameHeight, frameWidth, frameHeight);
+        }
       }
     }
 
-    this.createAvatarAnimations(key);
-    return true;
+    // Animations are created once per sheet: the frames never change, so
+    // re-creating them would tear down an animation a sprite is playing.
+    if (!this.anims.exists(`${sheetKey}_walk_down`)) {
+      this.createAvatarAnimations(sheetKey);
+    }
+    return sheetKey;
   }
 
-  private registerAvatarSpritesheet(key: string, config: AvatarConfig) {
-    if (!this.textures || !this.anims) return;
+  /**
+   * Registers the sheet for an avatar and returns the texture key that
+   * drives the sprite (a preset/cast sheet key, or the procedural canvas
+   * key). Never destroys a texture a live sprite may still reference.
+   */
+  private registerAvatarSpritesheet(key: string, config: AvatarConfig): string {
+    if (!this.textures || !this.anims) return key;
 
     const preset = this.resolveCharacterSheet(config.characterId);
-    if (preset && this.registerPresetSpritesheet(key, preset)) {
-      return;
+    if (preset) {
+      const sheetKey = this.registerPresetSpritesheet(key, preset);
+      if (sheetKey) return sheetKey;
+    }
+
+    // Placeholder pixel sprites are opt-in: without an explicit choice the
+    // avatar falls back to a hand-drawn character sheet.
+    if (!config.useProceduralAvatar) {
+      const fallback = this.resolveCharacterSheet(DEFAULT_AVATAR_CHARACTER_ID);
+      if (fallback) {
+        const sheetKey = this.registerPresetSpritesheet(key, fallback);
+        if (sheetKey) return sheetKey;
+      }
     }
 
     const canvas = generateAvatarSpritesheet(config);
@@ -467,14 +502,31 @@ export class OfficeScene extends Phaser.Scene {
         ctx.clearRect(0, 0, existing.width, existing.height);
         ctx.drawImage(canvas, 0, 0);
         existing.refresh();
-        return;
+        if (!this.anims.exists(`${key}_walk_down`)) {
+          this.createAvatarAnimations(key);
+        }
+        return key;
       }
-
-      this.removeAvatarAnimations(key);
-      this.textures.remove(key);
     }
 
-    const texture = this.textures.addCanvas(key, canvas);
+    // Something else already owns this key: use a private one instead of
+    // removing a texture that might still be in use.
+    const canvasKey = `${key}_custom`;
+    if (this.textures.exists(canvasKey)) {
+      const existing = this.textures.get(canvasKey) as Phaser.Textures.CanvasTexture;
+      if (existing && typeof existing.getContext === 'function') {
+        const ctx = existing.getContext();
+        ctx.clearRect(0, 0, existing.width, existing.height);
+        ctx.drawImage(canvas, 0, 0);
+        existing.refresh();
+        if (!this.anims.exists(`${canvasKey}_walk_down`)) {
+          this.createAvatarAnimations(canvasKey);
+        }
+        return canvasKey;
+      }
+    }
+
+    const texture = this.textures.addCanvas(canvasKey, canvas);
     if (texture) {
       for (let row = 0; row < 4; row++) {
         for (let col = 0; col < 3; col++) {
@@ -484,7 +536,8 @@ export class OfficeScene extends Phaser.Scene {
       }
     }
 
-    this.createAvatarAnimations(key);
+    this.createAvatarAnimations(canvasKey);
+    return canvasKey;
   }
 
   /**
@@ -706,7 +759,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // Preset sheets finished loading in preload(); register every avatar
     // texture before the world (and its sprites) is built.
-    this.registerAvatarSpritesheet('player_avatar', this.playerProfile.avatarConfig);
+    this.playerAvatarKey = this.registerAvatarSpritesheet('player_avatar', this.playerProfile.avatarConfig);
     this.otherUsers.forEach((user) => {
       this.registerAvatarSpritesheet(`avatar_${user.id}`, user.avatarConfig);
     });
@@ -715,6 +768,7 @@ export class OfficeScene extends Phaser.Scene {
     this.npcManager = new NpcManager(this, {
       getTileSize: () => this.tileSize,
       depthBase: RemotePlayerManager.ENTITY_DEPTH_BASE,
+      placeholderTextureKey: this.playerAvatarKey,
       bindSheet: (sprite, key, source, direction) => this.bindNpcSheet(sprite, key, source, direction),
       onTalk: (npc, line) => this.handleNpcTalk(npc, line),
     });
@@ -786,11 +840,12 @@ export class OfficeScene extends Phaser.Scene {
   public updatePlayerAvatar(newConfig: AvatarConfig) {
     this.playerProfile.avatarConfig = newConfig;
     if (!this.isReady || !this.textures || !this.anims) return;
-    this.registerAvatarSpritesheet('player_avatar', newConfig);
+    const key = this.registerAvatarSpritesheet('player_avatar', newConfig);
+    this.playerAvatarKey = key;
     if (this.player && this.player.active) {
       this.applyAvatarMetrics(this.player, newConfig);
-      this.player.setTexture('player_avatar');
-      const idleKey = `player_avatar_idle_${this.playerProfile.direction}`;
+      this.player.setTexture(key);
+      const idleKey = `${key}_idle_${this.playerProfile.direction}`;
       if (this.anims.exists(idleKey)) {
         try {
           // The texture and its animations were re-created above; stop first
@@ -1097,7 +1152,7 @@ export class OfficeScene extends Phaser.Scene {
     const spawnX = (overrideSpawnX !== undefined ? overrideSpawnX : spawn.tileX) * this.tileSize + this.tileSize / 2;
     const spawnY = (overrideSpawnY !== undefined ? overrideSpawnY : spawn.tileY) * this.tileSize + this.tileSize / 2;
 
-    this.player = this.physics.add.sprite(spawnX, spawnY, 'player_avatar');
+    this.player = this.physics.add.sprite(spawnX, spawnY, this.playerAvatarKey);
     this.applyAvatarMetrics(this.player, this.playerProfile.avatarConfig);
     // Uploaded sheet from the asset library (the player sprite is rebuilt on
     // every map change, so the swap has to be re-applied here).
@@ -1701,7 +1756,8 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   private spawnColleague(user: UserProfile) {
-    const key = `avatar_${user.id}`;
+    const baseKey = `avatar_${user.id}`;
+    const key = this.registerAvatarSpritesheet(baseKey, user.avatarConfig);
     const cx = user.x * this.tileSize + this.tileSize / 2;
     const cy = user.y * this.tileSize + this.tileSize / 2;
 
@@ -2564,7 +2620,11 @@ export class OfficeScene extends Phaser.Scene {
 
     this.player.setDepth(RemotePlayerManager.ENTITY_DEPTH_BASE + this.player.y + 0.3);
 
-    const animKey = isMoving ? `player_avatar_walk_${newDir}` : `player_avatar_idle_${newDir}`;
+    // The animation keys follow the texture key in use (a sheet can change
+    // when the player picks another character).
+    const animKey = isMoving
+      ? `${this.playerAvatarKey}_walk_${newDir}`
+      : `${this.playerAvatarKey}_idle_${newDir}`;
     if (this.player.anims.currentAnim?.key !== animKey) {
       this.player.play(animKey, true);
     }
@@ -2757,8 +2817,10 @@ export class OfficeScene extends Phaser.Scene {
     if (liamEntry) {
       const cycle = Math.floor(time / 3000) % 2;
       const targetDir = cycle === 0 ? 'left' : 'down';
-      if (liamEntry.sprite.anims.currentAnim?.key !== `avatar_user_liam_idle_${targetDir}`) {
-        liamEntry.sprite.play(`avatar_user_liam_idle_${targetDir}`);
+      // The animation key follows the texture the colleague is wearing.
+      const key = `${liamEntry.sprite.texture.key}_idle_${targetDir}`;
+      if (liamEntry.sprite.anims.currentAnim?.key !== key && this.anims.exists(key)) {
+        liamEntry.sprite.play(key);
       }
     }
   }

@@ -27,7 +27,7 @@ export class RemotePlayerManager {
   private scene: Phaser.Scene;
   private localUserId: string;
   private remotePlayers: Map<string, RemotePlayerEntity> = new Map();
-  private registerSpritesheetFn: (key: string, config: AvatarConfig) => void;
+  private registerSpritesheetFn: (key: string, config: AvatarConfig) => string;
   private applySpriteMetricsFn?: (sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) => void;
   /**
    * Optional hook that swaps a sprite over to a character sheet imported
@@ -53,7 +53,7 @@ export class RemotePlayerManager {
   constructor(
     scene: Phaser.Scene,
     localUserId: string,
-    registerSpritesheetFn: (key: string, config: AvatarConfig) => void,
+    registerSpritesheetFn: (key: string, config: AvatarConfig) => string,
     staticWallsGroup?: Phaser.Physics.Arcade.StaticGroup,
     tileScale: number = 1,
     applySpriteMetricsFn?: (sprite: Phaser.Physics.Arcade.Sprite, config: AvatarConfig) => void,
@@ -127,9 +127,11 @@ export class RemotePlayerManager {
       return;
     }
 
-    // Register avatar texture
-    const textureKey = `avatar_remote_${playerState.userId}`;
-    this.registerSpritesheetFn(textureKey, playerState.avatarConfig);
+    // Register avatar texture (the scene returns the key that is in use).
+    const textureKey = this.registerSpritesheetFn(
+      `avatar_remote_${playerState.userId}`,
+      playerState.avatarConfig
+    );
 
     const sprite = this.scene.physics.add.sprite(playerState.x, playerState.y, textureKey);
     this.applySpriteMetrics(sprite, playerState.avatarConfig);

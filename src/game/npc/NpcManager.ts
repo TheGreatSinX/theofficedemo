@@ -39,6 +39,8 @@ export interface NpcManagerOptions {
   getTileSize: () => number;
   /** Depth base used for Y sorting (shared with the player sprites). */
   depthBase: number;
+  /** Texture used until the real sheet is bound. */
+  placeholderTextureKey?: string;
   /**
    * Registers the sheet for an NPC and returns the texture key that should
    * drive the sprite. `null` keeps the placeholder texture.
@@ -91,7 +93,8 @@ export class NpcManager {
     const direction = definition.direction ?? 'down';
 
     // The placeholder keeps the sprite renderable until the sheet is bound.
-    const sprite = this.scene.physics.add.sprite(worldX, worldY, PLACEHOLDER_TEXTURE_KEY);
+    const placeholder = this.options.placeholderTextureKey ?? PLACEHOLDER_TEXTURE_KEY;
+    const sprite = this.scene.physics.add.sprite(worldX, worldY, placeholder);
     sprite.setDepth(this.options.depthBase + worldY + 0.2);
 
     const nameTag = this.createNameTag(definition);
@@ -99,7 +102,7 @@ export class NpcManager {
       definition,
       sprite,
       nameTag,
-      textureKey: PLACEHOLDER_TEXTURE_KEY,
+      textureKey: placeholder,
       route: buildRoute({ x: definition.x, y: definition.y }, definition.waypoints),
       waypointIndex: 1,
       direction,
@@ -133,7 +136,6 @@ export class NpcManager {
     runtime.textureKey = bound;
     this.playIdle(runtime);
   }
-
   /** Advances every NPC: patrol movement, animation and Y sorting. */
   public update(time: number, delta: number): void {
     const tile = this.options.getTileSize();
