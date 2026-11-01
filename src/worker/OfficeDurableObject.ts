@@ -39,6 +39,8 @@ interface StoredTicket {
   role: 'admin' | 'employee';
   avatarConfig: AvatarConfig;
   roomId: string;
+  /** Identity was verified with a Firebase ID token (see workerAuth). */
+  verified: boolean;
   createdAt: number;
   expiresAt: number;
 }
@@ -143,6 +145,7 @@ export class OfficeDurableObject {
       role: body.role === 'admin' ? 'admin' : 'employee',
       avatarConfig: (body.avatarConfig as AvatarConfig) || DEFAULT_AVATAR,
       roomId: this.roomId,
+      verified: body.verified === true,
       createdAt: now,
       expiresAt: now + TICKET_TTL_MS,
     };
@@ -201,6 +204,7 @@ export class OfficeDurableObject {
       role: stored.role,
       avatarConfig: stored.avatarConfig,
       roomId: this.roomId,
+      verified: stored.verified === true,
       socket: {
         send: (data: string) => {
           try {
@@ -221,15 +225,8 @@ export class OfficeDurableObject {
       lastSeen: Date.now(),
     };
 
-    // Note: addPlayer sends the room_snapshot before this welcome, mirroring
-    // the local server's ordering.
-    const addResult = room.addPlayer(session);
-    if (!addResult.success) {
-      server.close(4003, addResult.error || 'Failed to join room');
-      this.releaseRoomIfEmpty();
-      return new Response(null, { status: 101, webSocket: client } as any);
-    }
-
+    // Hello first (so the client can re-key itself on a server-assigned id),
+    // then the room snapshot.
     const welcomeMsg: ServerMessage = {
       type: 'welcome',
       version: PROTOCOL_VERSION,
@@ -238,6 +235,13 @@ export class OfficeDurableObject {
       tickRate: DEFAULT_TICK_RATE,
     };
     server.send(JSON.stringify(welcomeMsg));
+
+    const addResult = room.addPlayer(session);
+    if (!addResult.success) {
+      server.close(4003, addResult.error || 'Failed to join room');
+      this.releaseRoomIfEmpty();
+      return new Response(null, { status: 101, webSocket: client } as any);
+    }
 
     server.addEventListener('message', (event: any) => {
       try {

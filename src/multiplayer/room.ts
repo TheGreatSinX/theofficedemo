@@ -27,6 +27,12 @@ export interface RoomClientSession {
   role: 'admin' | 'employee';
   avatarConfig: AvatarConfig;
   roomId: string;
+  /**
+   * True when the session's identity was verified with a Firebase ID token.
+   * Unverified (guest) sessions may not declare the authoritative map for
+   * custom rooms; factory rooms are resolved by the server itself.
+   */
+  verified?: boolean;
   socket: {
     send: (data: string) => void;
     readyState?: number;
@@ -261,6 +267,16 @@ export class OfficeRoom {
    * registration defines the authoritative map (dimensions, tile size and
    * collision mask) for the room; later registrations are answered with the
    * canonical data, or a mismatch report when they disagree.
+   *
+   * Security model:
+   *  - Factory room ids are resolved by the server itself (built-in map data),
+   *    so the first client that connects can no longer define everyone's
+   *    collision geometry.
+   *  - Unverified (guest) sessions may never define the layout: for factory
+   *    rooms they must play the server-resolved factory map, and for custom
+   *    room ids they are refused outright.
+   *  - Verified sessions may declare the map for custom rooms, or override a
+   *    factory room with the published/edited revision.
    */
   public registerMap(session: RoomClientSession, msg: ClientRegisterMapMessage): void {
     if (!this.clients.has(session.userId)) return;
@@ -272,6 +288,31 @@ export class OfficeRoom {
     }
     // Trust our own hash of the decoded mask, not the client-provided one.
     const decodedHash = computeMaskHash(msg.width, msg.height, mask);
+
+    if (!this.hasClientRegistration && !session.verified) {
+      if (hasFactoryMap(this.roomId)) {
+        // Guests must play the server-resolved factory map.
+        const factory = getFactoryMap(this.roomId);
+        const factoryMask = getCollisionMask(factory);
+        const factoryHash = computeMaskHash(factory.width, factory.height, factoryMask);
+        const matchesFactory =
+          msg.width === factory.width &&
+          msg.height === factory.height &&
+          msg.tileSize === factory.tileSize &&
+          decodedHash === factoryHash;
+        if (!matchesFactory) {
+          this.sendMapMismatch(session);
+          return;
+        }
+      } else {
+        this.sendError(
+          session,
+          'MAP_REGISTRATION_FORBIDDEN',
+          'Only verified sessions can declare the layout for this room.'
+        );
+        return;
+      }
+    }
 
     if (!this.hasClientRegistration) {
       this.mapId = msg.mapId;
@@ -328,6 +369,14 @@ export class OfficeRoom {
     }
 
     // Mismatch: report the canonical room map so the client can reconcile.
+    this.sendMapMismatch(session);
+  }
+
+  /**
+   * Reports the canonical room map to a client whose declared map disagrees,
+   * including the server's own collision mask so the client can reconcile.
+   */
+  private sendMapMismatch(session: RoomClientSession): void {
     const canonicalMask = this.mapBounds.solidMask;
     const mismatch: ServerMessage = {
       type: 'map_mismatch',

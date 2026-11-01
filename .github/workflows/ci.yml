@@ -1,0 +1,49 @@
+# CI: typecheck, full test suite and production build on every push and PR.
+#
+# One lockfile is authoritative: package-lock.json (npm ci). This intentionally
+# guards against someone committing an untested `bun.lock` drift again —
+# installs come from the npm lockfile only.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Typecheck, test & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run lint
+
+      - name: Tests (rules, multiplayer, maps, editor, assets, npc)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      # Guard: the repo must not accumulate a second lockfile again (dual
+      # bun.lock/package-lock.json broke reproducible installs).
+      - name: No second lockfile allowed
+        run: |
+          if [ -f bun.lock ]; then
+            echo "::error file=bun.lock::Remove bun.lock — package-lock.json is the single lockfile."
+            exit 1
+          fi

@@ -613,3 +613,53 @@ by the updated art sheets.
   pass; the boardroom conference table (eight `table_conference` tiles) is a
   map-layout change, while the new `meeting_table` set is available in the
   Studio palette.
+
+
+## 23. Verified multiplayer identity, server-resolved maps and CI
+
+A security pass closed the two spoofing holes found in the codebase analysis:
+impersonation through token-less ticket requests and the first joiner defining
+the room physics.
+
+- **ID tokens on the WebSocket handshake.** `App.tsx` now resolves the Firebase
+  ID token (`user.getIdToken()`) before `multiplayerClient.connect(...)` and
+  passes it through the existing `Authorization: Bearer` header path.
+- **Server-assigned guest identity.** Token-less ticket requests no longer read
+  `userId` from the request body (the impersonation hole at
+  `serverAuth.ts:178-198`). Both resolvers (`serverAuth.ts` and the Workers
+  port `workerAuth.ts`) now issue a fresh server-generated `anon:<hex>` id per
+  guest session, cap the display name to 32 chars, and mark it
+  `verified: false`. Admin can never be self-asserted.
+- **Self re-keying.** Because guests (and any re-keyed session) no longer
+  control their multiplayer id, the `welcome` handshake is now consumed by the
+  client: both servers send `welcome` *before* the room snapshot, the client
+  stores the assigned id and `App.tsx` applies it to the scene via a new
+  `setLocalNetworkId` imperative call. `RemotePlayerManager` filters the local
+  player by the server-assigned id (falling back to the local profile id before
+  connect), so guests still see themselves once and remote ghosts do not
+  appear.
+- **`verified` threaded ticket -> session -> room.** `ConnectionTicketData`,
+  the DO `StoredTicket`, and `RoomClientSession` all carry the verified flag
+  (`verified: true` only when the identity came from an RS256-verified token).
+- **Server-side map resolution.** `register_map` is now gated in
+  `OfficeRoom.registerMap`:
+  - Factory room ids (`hasFactoryMap`) are resolved from built-in map data by
+    the room itself; an unverified session whose mask differs from the factory
+    revision gets a `map_mismatch` report with the server-computed canonical
+    mask instead of redefining the room physics.
+  - Unverified sessions cannot declare the layout for custom room ids at all
+    (`server_error` with code `MAP_REGISTRATION_FORBIDDEN`).
+  - Verified sessions may declare the canonical map for custom rooms and may
+    override a factory room with the published/edited revision (Studio publish
+    flow keeps working).
+- **CI.** A GitHub Actions workflow (`.github/workflows/ci.yml`) runs on pushes
+  and PRs to `main`: Node 20 `npm ci`, `npm run lint` (tsc), the six test
+  suites and a production build. It also fails the build if a second lockfile
+  (`bun.lock`) re-appears alongside the npm lockfile.
+- **Tests.** The multiplayer suite gained assertions for the three new gates:
+  token-less requests resolve to unique server-assigned identities, unverified
+  sessions are refused map registration for custom rooms, and factory rooms
+  answer guest registrations with the server-side canonical mask while
+  verified registrants are accepted. The suite now runs 35 multiplayer
+  assertions (80 total across the six suites).
+

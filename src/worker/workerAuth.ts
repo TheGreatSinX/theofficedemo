@@ -13,9 +13,9 @@
  *    verified `sub` claim, and the role is looked up in Firestore with the
  *    caller's own credentials (so Firestore rules decide what they may see) —
  *    the role in the request body is never trusted.
- *  - Without a token (local/dev deployments where Firebase auth is not
- *    configured) tickets are still issued, but the caller can never claim the
- *    admin role through this endpoint.
+ *  - Without a token (guest mode) tickets are still issued, but the caller
+ *    gets a server-assigned anonymous id, can never claim the admin role, and
+ *    sessions are marked unverified.
  */
 
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -239,8 +239,10 @@ function extractBearerToken(authorizationHeader: string | undefined): string | n
 /**
  * Resolves the identity for a ticket request.
  *  - With a valid ID token: userId = verified `sub`, role from Firestore.
- *  - Without a token: userId from the body (legacy/dev), role forced to
- *    `employee` — admin permissions can never be self-asserted.
+ *  - Without a token: the caller gets a server-assigned anonymous id
+ *    (`anon:<hex>`). The userId in the request body is never trusted — a guest
+ *    cannot impersonate another user, and unverified sessions cannot claim
+ *    admin or alter room-level state.
  */
 export async function resolveTicketIdentity(
   authorizationHeader: string | undefined,
@@ -249,15 +251,14 @@ export async function resolveTicketIdentity(
   const token = extractBearerToken(authorizationHeader);
 
   if (!token) {
-    const userId =
-      typeof body.userId === 'string' && body.userId.trim().length > 0 ? body.userId.trim() : null;
-    if (!userId) {
-      return { error: { status: 400, message: 'Missing or invalid userId' } };
-    }
+    const displayName =
+      typeof body.displayName === 'string' && body.displayName.trim().length > 0
+        ? body.displayName.trim().slice(0, 32)
+        : undefined;
     return {
       identity: {
-        userId,
-        displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
+        userId: `anon:${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`,
+        displayName,
         role: 'employee',
         verified: false,
       },

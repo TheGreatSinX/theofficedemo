@@ -12,10 +12,17 @@ import {
   DEFAULT_TICK_RATE,
 } from '../src/multiplayer/protocol';
 import { MovementAuthority } from '../src/multiplayer/authority';
+import { resolveTicketIdentity } from '../src/multiplayer/serverAuth';
 import { TicketService } from '../src/multiplayer/ticketService';
 import { OfficeRoom, OfficeRoomManager, RoomClientSession } from '../src/multiplayer/room';
 import { RemotePlayerManager } from '../src/multiplayer/RemotePlayerManager';
-import { computeMaskHash, createMaskGrid, encodeMaskForTransport } from '../src/game/maps/mapSchema';
+import {
+  computeMaskHash,
+  createMaskGrid,
+  encodeMaskForTransport,
+  getCollisionMask,
+} from '../src/game/maps/mapSchema';
+import { hasFactoryMap, getFactoryMap } from '../src/game/maps/officeMaps';
 import { AvatarConfig } from '../src/types/game';
 
 const sampleAvatar: AvatarConfig = {
@@ -50,6 +57,23 @@ async function runTests() {
   console.log('--- 1. Authentication & Connection Tickets ---');
 
   const ticketService = new TicketService();
+
+  const createMockSocket = () => {
+    const messages: any[] = [];
+    return {
+      messages,
+      send: (data: string) => messages.push(JSON.parse(data)),
+      readyState: 1,
+    };
+  };
+
+  const buildMask = (w: number, h: number, solidCells: Array<[number, number]>) => {
+    const mask = createMaskGrid(w, h, false);
+    for (const [x, y] of solidCells) {
+      if (mask[y] && x >= 0 && x < w) mask[y][x] = true;
+    }
+    return mask;
+  };
 
   await test('Test 1: Unauthenticated request cannot get valid ticket without userId', () => {
     // Missing userId must be rejected
@@ -113,6 +137,161 @@ async function runTests() {
 
     const wrongRoom = ticketService.consumeTicket(ticket.ticketId, 'confidential_draft_room');
     assert.strictEqual(wrongRoom, null, 'Ticket must be rejected if requested room does not match ticket scope');
+  });
+
+  await test('Test 4b: Tokenless requests get a server-assigned anonymous identity, never a body-declared one', async () => {
+    const { identity, error } = await resolveTicketIdentity(undefined, {
+      userId: 'impersonated_target',
+      displayName: 'Admin Impersonator',
+      role: 'admin',
+    });
+    assert.ok(identity, 'Tokenless request must still resolve to a guest identity');
+    assert.strictEqual(error, undefined);
+    assert.strictEqual(identity!.verified, false, 'Guest identity is unverified');
+    assert.strictEqual(identity!.role, 'employee', 'Guest cannot self-assign admin');
+    assert.ok(
+      identity!.userId.startsWith('anon:'),
+      `Guest userId must be server-assigned (anon:...), got ${identity!.userId}`
+    );
+    assert.notStrictEqual(
+      identity!.userId,
+      'impersonated_target',
+      'Body userId must never be trusted'
+    );
+    assert.strictEqual(identity!.displayName, 'Admin Impersonator', 'Display name stays player-chosen');
+
+    const second = await resolveTicketIdentity(undefined, { userId: 'someone_else' });
+    assert.ok(second.identity);
+    assert.notStrictEqual(
+      second.identity!.userId,
+      identity!.userId,
+      'Each guest request must get a fresh anonymous id'
+    );
+  });
+
+  await test('Test 4c: Unverified guest cannot declare the map for a custom room', () => {
+    const room = new OfficeRoom('guest_map_test', new MovementAuthority(), 50);
+    const sock = createMockSocket();
+    const guestSession: RoomClientSession = {
+      verified: false,
+      userId: 'anon:d34dbeef',
+      displayName: 'Guest',
+      role: 'employee',
+      avatarConfig: sampleAvatar,
+      roomId: 'guest_map_test',
+      socket: sock,
+      lastSeen: Date.now(),
+    };
+    room.addPlayer(guestSession, 100, 100);
+
+    sock.messages.length = 0;
+    const mask = buildMask(10, 10, []);
+    room.registerMap(guestSession, {
+      type: 'register_map',
+      roomId: 'guest_map_test',
+      mapId: 'guest_map_def',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, mask),
+      maskRle: encodeMaskForTransport(mask),
+      spawnTileX: 1,
+      spawnTileY: 1,
+    });
+
+    const err = sock.messages.find((m) => m.type === 'server_error') as any;
+    assert.ok(err, 'Guest registration must be answered with a server error');
+    assert.strictEqual(err.code, 'MAP_REGISTRATION_FORBIDDEN', 'Error must flag the forbidden registration');
+    assert.strictEqual(room.getMapRegistrationInfo().registered, false, 'Room must remain unregistered');
+    room.dispose();
+  });
+
+  await test('Test 4d: Factory room physics are server-resolved; guests cannot redefine them, verified sessions can override', () => {
+    const factory = getFactoryMap('main_office');
+    assert.ok(hasFactoryMap('main_office'), 'main_office must be a factory room for this test');
+    const factoryMask = getCollisionMask(factory);
+
+    // Guest trying to claim a different (smaller) revision gets the canonical
+    // server-resolved mask back instead of redefining the room.
+    const guestRoom = new OfficeRoom('main_office', new MovementAuthority(), 50);
+    const guestSock = createMockSocket();
+    guestRoom.addPlayer({
+      verified: false,
+      userId: 'anon:b1df00d',
+      displayName: 'Guest',
+      role: 'employee',
+      avatarConfig: sampleAvatar,
+      roomId: 'main_office',
+      socket: guestSock,
+      lastSeen: Date.now(),
+    }, 100, 100);
+    guestSock.messages.length = 0;
+    const bogusMask = buildMask(10, 10, []);
+    guestRoom.registerMap({
+      verified: false,
+      userId: 'anon:b1df00d',
+      displayName: 'Guest',
+      role: 'employee',
+      avatarConfig: sampleAvatar,
+      roomId: 'main_office',
+      socket: guestSock,
+      lastSeen: Date.now(),
+    }, {
+      type: 'register_map',
+      roomId: 'main_office',
+      mapId: 'main_office',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, bogusMask),
+      maskRle: encodeMaskForTransport(bogusMask),
+      spawnTileX: 1,
+      spawnTileY: 1,
+    });
+    const mismatch = guestSock.messages.find((m) => m.type === 'map_mismatch') as any;
+    assert.ok(mismatch, 'Guest must receive the canonical report, not redefine the room');
+    assert.strictEqual(mismatch.width, factory.width, 'Canonical width comes from the factory map');
+    assert.strictEqual(mismatch.height, factory.height, 'Canonical height comes from the factory map');
+    assert.strictEqual(
+      mismatch.maskHash,
+      computeMaskHash(factory.width, factory.height, factoryMask),
+      'Canonical mask hash is computed server-side'
+    );
+    assert.strictEqual(guestRoom.getMapRegistrationInfo().registered, false);
+    guestRoom.dispose();
+
+    // A verified session may legitimately publish/override the room revision.
+    const verifiedRoom = new OfficeRoom('main_office', new MovementAuthority(), 50);
+    const ownerSock = createMockSocket();
+    const ownerSession: RoomClientSession = {
+      verified: true,
+      userId: 'verified_admin',
+      displayName: 'Admin',
+      role: 'admin',
+      avatarConfig: sampleAvatar,
+      roomId: 'main_office',
+      socket: ownerSock,
+      lastSeen: Date.now(),
+    };
+    verifiedRoom.addPlayer(ownerSession, 100, 100);
+    ownerSock.messages.length = 0;
+    verifiedRoom.registerMap(ownerSession, {
+      type: 'register_map',
+      roomId: 'main_office',
+      mapId: 'main_office',
+      width: 10,
+      height: 10,
+      tileSize: 32,
+      maskHash: computeMaskHash(10, 10, bogusMask),
+      maskRle: encodeMaskForTransport(bogusMask),
+      spawnTileX: 1,
+      spawnTileY: 1,
+    });
+    const registered = ownerSock.messages.find((m) => m.type === 'map_registered') as any;
+    assert.ok(registered, 'Verified registration must be accepted');
+    assert.strictEqual(registered.canonical, true);
+    assert.strictEqual(verifiedRoom.getMapRegistrationInfo().width, 10);
+    verifiedRoom.dispose();
   });
 
   await test('Test 5: Protocol rejects malformed client message payloads', () => {
@@ -210,20 +389,12 @@ async function runTests() {
 
   const room = new OfficeRoom('test_room_alpha', new MovementAuthority(), 20);
 
-  const createMockSocket = () => {
-    const messages: any[] = [];
-    return {
-      messages,
-      send: (data: string) => messages.push(JSON.parse(data)),
-      readyState: 1,
-    };
-  };
-
   const clientA_sock = createMockSocket();
   const clientB_sock = createMockSocket();
 
   await test('Test 12: New player joining receives room snapshot', () => {
     const sessionA: RoomClientSession = {
+      verified: true,
       userId: 'player_a',
       displayName: 'Alice Lead',
       role: 'admin',
@@ -244,6 +415,7 @@ async function runTests() {
 
   await test('Test 13: Existing players receive player_joined event when another user connects', () => {
     const sessionB: RoomClientSession = {
+      verified: true,
       userId: 'player_b',
       displayName: 'Bob Dev',
       role: 'employee',
@@ -292,6 +464,7 @@ async function runTests() {
     const clientC_sock = createMockSocket();
 
     const sessionC: RoomClientSession = {
+      verified: true,
       userId: 'player_c',
       displayName: 'Charlie Remote',
       role: 'employee',
@@ -339,6 +512,7 @@ async function runTests() {
   await test('Test 17: Reconnecting with same user updates session without duplicate characters', () => {
     const newSock = createMockSocket();
     const sessionB_Reconnected: RoomClientSession = {
+      verified: true,
       userId: 'player_b',
       displayName: 'Bob Dev',
       role: 'employee',
@@ -691,14 +865,6 @@ async function runTests() {
   // ==========================================
   console.log('\n--- 7. Dynamic Map Registration & Server-Side Bounds ---');
 
-  const buildMask = (w: number, h: number, solidCells: Array<[number, number]>) => {
-    const mask = createMaskGrid(w, h, false);
-    for (const [x, y] of solidCells) {
-      if (mask[y] && x >= 0 && x < w) mask[y][x] = true;
-    }
-    return mask;
-  };
-
   await test('Test 28: register_map validation accepts well-formed payloads and rejects malformed ones', () => {
     const mask = buildMask(10, 10, []);
     const base = {
@@ -725,6 +891,7 @@ async function runTests() {
     const dynRoom = new OfficeRoom('dynamic_office_test', new MovementAuthority(), 50);
     const sockOwner = createMockSocket();
     const ownerSession: RoomClientSession = {
+      verified: true,
       userId: 'map_owner',
       displayName: 'Owner',
       role: 'admin',
@@ -813,6 +980,7 @@ async function runTests() {
     const dynRoom = new OfficeRoom('dynamic_bounds_test', new MovementAuthority(), 50);
     const sock = createMockSocket();
     const session: RoomClientSession = {
+      verified: true,
       userId: 'bounds_user',
       displayName: 'Bounds',
       role: 'employee',
@@ -868,6 +1036,7 @@ async function runTests() {
     const dynRoom = new OfficeRoom('dynamic_mismatch_test', new MovementAuthority(), 50);
     const sockOwner = createMockSocket();
     const ownerSession: RoomClientSession = {
+      verified: true,
       userId: 'canonical_owner',
       displayName: 'Owner',
       role: 'admin',
@@ -896,6 +1065,7 @@ async function runTests() {
     // Same-mask joiner
     const sockSame = createMockSocket();
     const sameSession: RoomClientSession = {
+      verified: true,
       userId: 'same_mask_user',
       displayName: 'Same',
       role: 'employee',
@@ -925,6 +1095,7 @@ async function runTests() {
     // Mismatched-mask joiner
     const sockDiff = createMockSocket();
     const diffSession: RoomClientSession = {
+      verified: true,
       userId: 'diff_mask_user',
       displayName: 'Diff',
       role: 'employee',
@@ -962,6 +1133,7 @@ async function runTests() {
     const sockOwner = createMockSocket();
     const sockBystander = createMockSocket();
     const ownerSession: RoomClientSession = {
+      verified: true,
       userId: 'reloc_owner',
       displayName: 'Owner',
       role: 'admin',
@@ -971,6 +1143,7 @@ async function runTests() {
       lastSeen: Date.now(),
     };
     const bystanderSession: RoomClientSession = {
+      verified: true,
       userId: 'reloc_bystander',
       displayName: 'Bystander',
       role: 'employee',

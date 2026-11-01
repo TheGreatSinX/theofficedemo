@@ -209,6 +209,12 @@ export class OfficeScene extends Phaser.Scene {
   /** Texture key that currently drives the player sprite. */
   private playerAvatarKey: string = 'player_avatar';
   private playerProfile: UserProfile;
+  /**
+   * Server-assigned userId from the multiplayer `welcome` handshake. Guests
+   * (and any session whose identity the server re-keys) must exclude the
+   * snapshot entry carrying this id, not the local profile id.
+   */
+  private localNetworkId: string | null = null;
   private remotePlayerManager!: RemotePlayerManager;
   private otherUsers: UserProfile[] = [];
   private otherUserSprites: Map<
@@ -1232,7 +1238,7 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.remotePlayerManager) {
       this.remotePlayerManager = new RemotePlayerManager(
         this,
-        this.playerProfile.id,
+        this.localNetworkId ?? this.playerProfile.id,
         (key, cfg) => this.registerAvatarSpritesheet(key, cfg),
         this.staticWallsGroup,
         this.tileScale,
@@ -1240,7 +1246,7 @@ export class OfficeScene extends Phaser.Scene {
         (sprite, cfg, direction) => this.applyCustomCharacterAvatar(sprite, cfg, direction)
       );
     } else {
-      this.remotePlayerManager.setLocalUserId(this.playerProfile.id);
+      this.remotePlayerManager.setLocalUserId(this.localNetworkId ?? this.playerProfile.id);
       this.remotePlayerManager.setTileScale(this.tileScale);
     }
 
@@ -2872,8 +2878,24 @@ export class OfficeScene extends Phaser.Scene {
 
   public updateLocalPlayerProfile(profile: UserProfile) {
     this.playerProfile = profile;
-    if (this.remotePlayerManager) this.remotePlayerManager.setLocalUserId(profile.id);
+    // A server-assigned network id stays authoritative for remote-snapshot
+    // filtering; the local profile id is only a pre-connect fallback.
+    if (this.remotePlayerManager) {
+      this.remotePlayerManager.setLocalUserId(this.localNetworkId ?? profile.id);
+    }
     this.updatePlayerAvatar(profile.avatarConfig);
+  }
+
+  /**
+   * Applies the server-assigned userId from the multiplayer `welcome`
+   * handshake so snapshots in which the server re-keys the local player are
+   * self-excluded from the remote layer.
+   */
+  public setLocalNetworkId(id: string) {
+    this.localNetworkId = id;
+    if (this.remotePlayerManager) {
+      this.remotePlayerManager.setLocalUserId(id);
+    }
   }
 
   public getPlayerPosition(): { x: number; y: number } {

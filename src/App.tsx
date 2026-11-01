@@ -263,15 +263,44 @@ function VirtualOfficeApp() {
     }
   }, []);
 
+  // Applies the server-assigned userId (verified `sub` or guest anon id) to the
+  // scene so remote snapshots never render the local player as a ghost.
+  const rekeyLocalNetworkId = useCallback(() => {
+    const assigned = multiplayerClient.getAssignedUserId();
+    if (assigned && assigned !== playerProfile.id) {
+      canvasRef.current?.setLocalNetworkId(assigned);
+    }
+  }, [playerProfile.id]);
+
   useEffect(() => {
     let isMounted = true;
-    multiplayerClient.connect(playerProfile, currentMapId);
+    let cancelled = false;
+
+    // Resolve the Firebase ID token first: verified sessions get the token
+    // `sub` as their multiplayer identity; guests get a server-assigned
+    // anonymous id. Requests without a token can no longer claim any userId.
+    const start = async () => {
+      let idToken: string | undefined;
+      if (user) {
+        try {
+          idToken = await user.getIdToken();
+        } catch (err) {
+          console.warn('[App] Could not retrieve ID token, connecting as guest', err);
+        }
+      }
+      if (cancelled) return;
+      multiplayerClient.connect(playerProfile, currentMapId, idToken);
+    };
+    void start();
 
     const unsubState = multiplayerClient.onStateChange((state) => {
       if (isMounted) setConnectionState(state);
     });
 
     const unsubSnapshot = multiplayerClient.onRoomSnapshot((players) => {
+      // If the server re-keyed our session (verified `sub` or guest anon id),
+      // keep the renderer self-exclusion in sync before applying snapshots.
+      rekeyLocalNetworkId();
       canvasRef.current?.syncRemoteSnapshot(players);
     });
 
@@ -301,13 +330,19 @@ function VirtualOfficeApp() {
       }
     });
 
-    const unsubMapMismatch = multiplayerClient.onMapMismatch((info) => {
+    const unsubMismatch = multiplayerClient.onMapMismatch((info) => {
       if (!isMounted) return;
       showToast(
         'error',
         `Multiplayer room is running a different map revision (${info.width}×${info.height}). Movement is validated against the room version — save and reload for everyone to match.`,
         7000
       );
+    });
+
+    // Server-assigned-identity handshake: re-key self-exclusion as soon as the
+    // server tells us our session id.
+    const unsubWelcome = multiplayerClient.onWelcome(() => {
+      rekeyLocalNetworkId();
     });
 
     const pingTimer = setInterval(() => {
@@ -327,10 +362,11 @@ function VirtualOfficeApp() {
       unsubCorrection();
       unsubReaction();
       unsubMapRegistered();
-      unsubMapMismatch();
+      unsubMismatch();
+      unsubWelcome();
       multiplayerClient.disconnect();
     };
-  }, [currentMapId, playerProfile.id, showToast]);
+  }, [currentMapId, playerProfile.id, rekeyLocalNetworkId, showToast, user]);
 
   // -------------------------------------------------------------------------
   // Map loading (assets preloaded before the scene builds)

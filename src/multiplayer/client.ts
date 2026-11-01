@@ -9,6 +9,7 @@ import {
   ServerMessage,
   ServerMapRegisteredMessage,
   ServerMapMismatchMessage,
+  ServerWelcomeMessage,
   PlayerNetState,
   PROTOCOL_VERSION,
   DEFAULT_TICK_RATE,
@@ -82,6 +83,15 @@ export class MultiplayerClient {
   private reactionListeners: Array<(reaction: { userId: string; emoji: string }) => void> = [];
   private mapRegisteredListeners: Array<(info: ServerMapRegisteredMessage) => void> = [];
   private mapMismatchListeners: Array<(info: ServerMapMismatchMessage) => void> = [];
+  private welcomeListeners: Array<(msg: ServerWelcomeMessage) => void> = [];
+  /**
+   * The server-assigned userId from the `welcome` handshake. For verified
+   * sessions this is the token `sub`; for guests it is the server's anonymous
+   * id, which differs from the locally generated profile id. Used so the
+   * renderer can exclude the local player from the remote snapshot even when
+   * the server re-keys the session.
+   */
+  private assignedUserId: string | null = null;
 
   /** Map registration payload sent after joining so the server validates against this map. */
   private mapRegistration: ClientRegisterMapMessage | null = null;
@@ -348,7 +358,11 @@ export class MultiplayerClient {
   private handleServerMessage(msg: ServerMessage) {
     switch (msg.type) {
       case 'welcome':
-        // Connection handshake verified
+        // Connection handshake: remember the server-assigned userId (token
+        // `sub` for verified sessions, anonymous id for guests) so the
+        // renderer can exclude the local player from remote snapshots.
+        this.assignedUserId = msg.userId;
+        this.welcomeListeners.forEach((cb) => cb(msg));
         break;
       case 'room_snapshot':
         this.snapshotListeners.forEach((cb) => cb(msg.players));
@@ -532,6 +546,18 @@ export class MultiplayerClient {
     return () => {
       this.mapMismatchListeners = this.mapMismatchListeners.filter((cb) => cb !== callback);
     };
+  }
+
+  public onWelcome(callback: (msg: ServerWelcomeMessage) => void): () => void {
+    this.welcomeListeners.push(callback);
+    return () => {
+      this.welcomeListeners = this.welcomeListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  /** The server-assigned userId, available after the `welcome` handshake. */
+  public getAssignedUserId(): string | null {
+    return this.assignedUserId;
   }
 }
 

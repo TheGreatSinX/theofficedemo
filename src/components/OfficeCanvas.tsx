@@ -63,6 +63,8 @@ export interface OfficeCanvasHandle {
   showReactionBubble: (senderId: string, emoji: string, durationMs?: number) => void;
   setControlsEnabled: (enabled: boolean) => void;
   syncRemoteSnapshot: (players: PlayerNetState[]) => void;
+  /** Applies the server-assigned userId from the `welcome` handshake. */
+  setLocalNetworkId: (id: string) => void;
   handleRemotePlayerJoined: (player: PlayerNetState) => void;
   handleRemotePlayerLeft: (userId: string) => void;
   handleRemotePlayerStates: (
@@ -167,6 +169,9 @@ export const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(
       },
       syncRemoteSnapshot: (players) => {
         sceneRef.current?.syncRemoteSnapshot(players);
+      },
+      setLocalNetworkId: (id) => {
+        sceneRef.current?.setLocalNetworkId(id);
       },
       handleRemotePlayerJoined: (player) => {
         sceneRef.current?.handleRemotePlayerJoined(player);

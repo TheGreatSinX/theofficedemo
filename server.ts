@@ -93,6 +93,7 @@ app.post('/api/auth/ticket', async (req, res) => {
         accessory: 'none',
       },
       roomId: targetRoomId,
+      verified: identity.verified,
     });
 
     res.json({
@@ -150,6 +151,7 @@ wss.on('connection', (ws: WebSocket, req: http.IncomingMessage, ticket: any) => 
     role: ticket.role,
     avatarConfig: ticket.avatarConfig,
     roomId: ticket.roomId,
+    verified: ticket.verified === true,
     socket: {
       send: (data: string) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -162,13 +164,8 @@ wss.on('connection', (ws: WebSocket, req: http.IncomingMessage, ticket: any) => 
     lastSeen: Date.now(),
   };
 
-  const addResult = room.addPlayer(session);
-  if (!addResult.success) {
-    ws.close(4003, addResult.error || 'Failed to join room');
-    return;
-  }
-
-  // Send Welcome message
+  // Hello first (so the client can re-key itself on a server-assigned id), then
+  // the room snapshot.
   const welcomeMsg: ServerMessage = {
     type: 'welcome',
     version: PROTOCOL_VERSION,
@@ -177,6 +174,12 @@ wss.on('connection', (ws: WebSocket, req: http.IncomingMessage, ticket: any) => 
     tickRate: DEFAULT_TICK_RATE,
   };
   ws.send(JSON.stringify(welcomeMsg));
+
+  const addResult = room.addPlayer(session);
+  if (!addResult.success) {
+    ws.close(4003, addResult.error || 'Failed to join room');
+    return;
+  }
 
   ws.on('message', (data: Buffer | string) => {
     try {

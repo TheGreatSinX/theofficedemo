@@ -13,6 +13,12 @@ export interface ConnectionTicketData {
   role: 'admin' | 'employee';
   avatarConfig: AvatarConfig;
   roomId: string;
+  /**
+   * True when the userId was cryptographically verified (Firebase ID token).
+   * Unverified (guest) sessions get a server-assigned anonymous id and may not
+   * alter room-level state such as the authoritative map registration.
+   */
+  verified: boolean;
   createdAt: number;
   expiresAt: number;
   used: boolean;
@@ -32,6 +38,7 @@ export class TicketService {
     role: 'admin' | 'employee';
     avatarConfig: AvatarConfig;
     roomId: string;
+    verified?: boolean;
   }): ConnectionTicketData {
     const ticketId = `tkt_${crypto.randomBytes(24).toString('hex')}`;
     const now = Date.now();
@@ -42,6 +49,7 @@ export class TicketService {
       role: params.role || 'employee',
       avatarConfig: params.avatarConfig,
       roomId: params.roomId || 'main_office',
+      verified: params.verified === true,
       createdAt: now,
       expiresAt: now + TicketService.TICKET_TTL_MS,
       used: false,
